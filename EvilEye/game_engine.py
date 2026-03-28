@@ -213,9 +213,9 @@ def discover_evil_eye(deadline=DISCOVERY_DEADLINE):
     sock.settimeout(0.5)
 
     try:
-        sock.bind(("255.255.255.255", DISCOVERY_RECV_PORT))
+        sock.bind(("0.0.0.0", DISCOVERY_RECV_PORT))
     except Exception as e:
-        print(f"[Discovery] Bind error on 255.255.255.255:{DISCOVERY_RECV_PORT}: {e}")
+        print(f"[Discovery] Bind error on 0.0.0.0:{DISCOVERY_RECV_PORT}: {e}")
         sock.close()
         return []
 
