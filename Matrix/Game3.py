@@ -44,7 +44,7 @@ DMG_COOLDOWN = 1.0
 CHASE_RADIUS = 4
 CHASE_MAX_SEC = 3.0
 CHASE_CD_SEC = 2.0
-CHASE_PROB = 0.35
+CHASE_PROB = 0.5
 
 BASE_MIN_FRUITS = 2
 BASE_SPAWN_INTERVAL = 5.0
@@ -64,10 +64,10 @@ FRUIT_DEFS = [
 # ============================================================
 
 SNAKE_DIFFICULTIES = {
-    "easy":      dict(base_interval=0.2,  min_interval=0.16, fruit_weights=(8, 2, 1)),
-    "medium":    dict(base_interval=0.16, min_interval=0.11, fruit_weights=(5, 3, 2)),
-    "hard":      dict(base_interval=0.12, min_interval=0.08, fruit_weights=(3, 4, 3)),
-    "nightmare": dict(base_interval=0.04, min_interval=0.02, fruit_weights=(2, 4, 4)),
+    "easy":      dict(base_interval=0.2,  min_interval=0.16, fruit_weights=(8, 2, 1), wrap=False),
+    "medium":    dict(base_interval=0.16, min_interval=0.11, fruit_weights=(5, 3, 2), wrap=False),
+    "hard":      dict(base_interval=0.2, min_interval=0.08, fruit_weights=(3, 4, 3), wrap=True),
+    "nightmare": dict(base_interval=0.16, min_interval=0.02, fruit_weights=(2, 4, 4), wrap=True),
 }
 
 PLAYER_LENGTH = {
@@ -88,6 +88,7 @@ class SnakeSettings:
         self.min_interval = diff["min_interval"]
         self.initial_length = PLAYER_LENGTH[self.player_count]
         self.fruit_weights = diff["fruit_weights"]
+        self.wrap = diff["wrap"]
         self.min_fruits = BASE_MIN_FRUITS + (self.player_count - 2) // 2
         self.spawn_interval = BASE_SPAWN_INTERVAL - 0.5 * (self.player_count - 2)
 
@@ -143,14 +144,23 @@ def _inbounds(p):
     return 0 <= p[0] < BOARD_WIDTH and PLAY_Y_MIN <= p[1] < PLAY_Y_MAX
 
 
-def _neighbours(pos):
-    """Return the four wrapped neighbours of *pos*."""
+def _neighbours(pos, wrap=True):
+    """Return the four neighbours of *pos*.
+    When *wrap* is True the board is toroidal; when False, out-of-bounds
+    neighbours are discarded."""
     x, y = pos
-    return [_wrap((x + dx, y + dy)) for dx, dy in _DIRS]
+    if wrap:
+        return [_wrap((x + dx, y + dy)) for dx, dy in _DIRS]
+    out = []
+    for dx, dy in _DIRS:
+        nx, ny = x + dx, y + dy
+        if _inbounds((nx, ny)):
+            out.append((nx, ny))
+    return out
 
 
-def _bfs(start, goal, walls):
-    """Shortest path from *start* to *goal* with toroidal wrapping.
+def _bfs(start, goal, walls, wrap=True):
+    """Shortest path from *start* to *goal*.
     Returns list of cells [first_step, ..., goal] or []."""
     if start == goal:
         return []
@@ -159,7 +169,7 @@ def _bfs(start, goal, walls):
     queue = deque([start])
     while queue:
         cur = queue.popleft()
-        for nb in _neighbours(cur):
+        for nb in _neighbours(cur, wrap):
             if nb in visited:
                 continue
             if nb in walls and nb != goal:
@@ -178,7 +188,7 @@ def _bfs(start, goal, walls):
     return []
 
 
-def _longest_toward(start, goal, walls):
+def _longest_toward(start, goal, walls, wrap=True):
     """A* that maximises path cost to *goal* (picks the farthest / most
     winding route).  Uses max-F selection so the snake takes the longest
     safe path when following its own tail, buying time.
@@ -189,11 +199,14 @@ def _longest_toward(start, goal, walls):
     closed = set()
     g_cost = {start: 0}
     parent = {}
-    # toroidal Manhattan distance
     w, h = BOARD_WIDTH, PLAY_Y_MAX - PLAY_Y_MIN
     def _h(a):
-        dx = min(abs(a[0] - goal[0]), w - abs(a[0] - goal[0]))
-        dy = min(abs(a[1] - goal[1]), h - abs(a[1] - goal[1]))
+        if wrap:
+            dx = min(abs(a[0] - goal[0]), w - abs(a[0] - goal[0]))
+            dy = min(abs(a[1] - goal[1]), h - abs(a[1] - goal[1]))
+        else:
+            dx = abs(a[0] - goal[0])
+            dy = abs(a[1] - goal[1])
         return dx + dy
 
     while open_list:
@@ -208,7 +221,7 @@ def _longest_toward(start, goal, walls):
         open_list.remove(best)
         closed.add(best)
 
-        for nb in _neighbours(best):
+        for nb in _neighbours(best, wrap):
             if nb in closed:
                 continue
             if nb in walls and nb != goal:
@@ -227,13 +240,13 @@ def _longest_toward(start, goal, walls):
     return None
 
 
-def _flood_area(head, walls):
-    """Count reachable cells from *head* through open (wrapped) space."""
+def _flood_area(head, walls, wrap=True):
+    """Count reachable cells from *head*."""
     visited = {head}
     queue = deque([head])
     while queue:
         cur = queue.popleft()
-        for nb in _neighbours(cur):
+        for nb in _neighbours(cur, wrap):
             if nb not in walls and nb not in visited:
                 visited.add(nb)
                 queue.append(nb)
@@ -268,8 +281,10 @@ class Fruit:
 # ============================================================
 
 class Snake:
-    def __init__(self, cx, cy, length, base_interval, min_interval):
-        self.body = [_wrap((cx, cy - i)) for i in range(length)]
+    def __init__(self, cx, cy, length, base_interval, min_interval, wrap=True):
+        self.wrap = wrap
+        init_fn = _wrap if wrap else lambda p: p
+        self.body = [init_fn((cx, cy - i)) for i in range(length)]
         self.grow = 0
         self._evt = time.time()
         self._next_shrink = self._evt + SHRINK_TIMEOUT
@@ -430,7 +445,8 @@ class _Play(GameState):
         cx = BOARD_WIDTH // 2
         cy = (PLAY_Y_MIN + PLAY_Y_MAX) // 2
         s = self.settings
-        return Snake(cx, cy, s.initial_length, s.base_interval, s.min_interval)
+        return Snake(cx, cy, s.initial_length, s.base_interval, s.min_interval,
+                     wrap=s.wrap)
 
     def enter(self, engine):
         engine.entities.clear()
@@ -550,15 +566,16 @@ class _Play(GameState):
         vwalls = set(vbody)
         if vgrow == 0:
             vwalls.discard(vtail)
-        if not _bfs(vhead, vtail, vwalls):
+        wrap = self.snake.wrap
+        if not _bfs(vhead, vtail, vwalls, wrap):
             return False
-        area = _flood_area(vhead, vwalls)
+        area = _flood_area(vhead, vwalls, wrap)
         return area >= int(future_len * 1.5)
 
     def _safe_step_toward(self, goal, walls):
         """BFS toward *goal*; simulate the walk and check the virtual snake
         can still reach its tail.  Returns the first step or None."""
-        path = _bfs(self.snake.head, goal, walls)
+        path = _bfs(self.snake.head, goal, walls, self.snake.wrap)
         if not path:
             return None
         vbody, vgrow, ok = self._sim_walk(path, 0)
@@ -567,15 +584,16 @@ class _Play(GameState):
         return None
 
     def _flood_pick(self):
-        """Emergency fallback: among all wrapped neighbours that advance()
+        """Emergency fallback: among all neighbours that advance()
         would accept, pick the one with the most flood-fill room."""
         head = self.snake.head
         body = self.snake.body
         will_pop = self.snake.grow <= 0
+        wrap = self.snake.wrap
 
         best = None
         best_area = -1
-        for nxt in _neighbours(head):
+        for nxt in _neighbours(head, wrap):
             ok = True
             for i, seg in enumerate(body):
                 if seg == nxt:
@@ -590,7 +608,7 @@ class _Play(GameState):
                 sim_body.pop()
             sim_walls = set(sim_body)
             sim_walls.discard(sim_body[-1])
-            area = _flood_area(nxt, sim_walls)
+            area = _flood_area(nxt, sim_walls, wrap)
             if area > best_area:
                 best_area = area
                 best = nxt
@@ -622,10 +640,12 @@ class _Play(GameState):
         walls = self._walls()
         tail = self.snake.body[-1]
 
+        wrap = self.snake.wrap
+
         # ── 1. pursue target ──
         if tgt is not None:
             if kind == "fruit":
-                path = _bfs(head, tgt, walls)
+                path = _bfs(head, tgt, walls, wrap)
                 if path:
                     grow_bonus = 0
                     for fr in self.fruits:
@@ -650,14 +670,14 @@ class _Play(GameState):
                         return False
 
         # ── 2. follow own tail ──
-        tail_path = _bfs(head, tail, walls)
+        tail_path = _bfs(head, tail, walls, wrap)
         if tail_path:
             result = self._try_move(tail_path[0])
             if result == "self_collide":
                 return True
             if result == "ok":
                 return False
-        longest_step = _longest_toward(head, tail, walls)
+        longest_step = _longest_toward(head, tail, walls, wrap)
         if longest_step is not None:
             result = self._try_move(longest_step)
             if result == "self_collide":
@@ -783,16 +803,19 @@ class _End(GameState):
                 engine.draw_text_small("LOSE", 2, 6, RED)
 
         # snake ate  (snake icon = green square + count)
-        engine.set_pixel(1, 14, *BODY_COL)
-        engine.set_pixel(2, 14, *BODY_COL)
-        engine.set_pixel(3, 14, *HEAD_COL)
+        engine.set_pixel(1, 15, *BODY_COL)
+        engine.set_pixel(2, 15, *BODY_COL)
+        engine.set_pixel(3, 15, *HEAD_COL)
         sa = str(self.snake_ate)
         engine.draw_text_small(sa, 6, 13, RED)
 
         # players destroyed  (foot icon = white square + count)
         engine.set_pixel(1, 20, *WHITE)
-        engine.set_pixel(2, 20, *WHITE)
         engine.set_pixel(1, 21, *WHITE)
+        engine.set_pixel(2, 20, *WHITE)
+        engine.set_pixel(2, 21, *WHITE)
+        engine.set_pixel(3, 19, *WHITE)
+        engine.set_pixel(3, 22, *WHITE)
         pd = str(self.players_destroyed)
         engine.draw_text_small(pd, 6, 19, GREEN)
 
@@ -800,7 +823,7 @@ class _End(GameState):
         secs = str(int(self.play_time))
         engine.draw_text_small(secs + "S", 1, 26, YELLOW)
 
-        if self.t > 2.0 and engine.any_pressed():
+        if self.t > 8.0 and engine.any_pressed():
             return ("start", {})
 
     def exit(self, engine):
