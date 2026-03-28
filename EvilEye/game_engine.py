@@ -174,9 +174,9 @@ def build_frame_data(led_states):
 #  NetworkManager
 # ============================================================
 
-DISCOVERY_SEND_IP   = "169.254.162.11"
-DISCOVERY_SEND_PORT = 12345
-DISCOVERY_RECV_PORT = 54321
+DISCOVERY_SEND_IP   = "169.254.182.11"
+DISCOVERY_SEND_PORT = 4626
+DISCOVERY_RECV_PORT = 7800
 DISCOVERY_DEADLINE  = 5.0
 
 
