@@ -1,301 +1,359 @@
-import socket
-import struct
 import time
-import threading
 import random
-import copy
-import psutil
 import os
+import sys
 
-import json
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from game_engine import (
+    GameEngine, GameState, GameMaster, NetworkManager,
+    load_config, run_game,
+    BOARD_WIDTH, BOARD_HEIGHT,
+    BLACK, WHITE, RED, YELLOW, GREEN, BLUE, CYAN, MAGENTA, ORANGE,
+)
 
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
+PLATFORM_COLORS = [GREEN, CYAN, MAGENTA, YELLOW, BLUE, ORANGE, RED, WHITE]
 
-# --- Configuration ---
 _CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tetris_config.json")
 
-def _load_config():
-    defaults = {
-        "device_ip": "255.255.255.255",
-        "send_port": 50067,
-        "recv_port": 50167,
-        "bind_ip": "0.0.0.0"
-    }
-    try:
-        if os.path.exists(_CFG_FILE):
-            with open(_CFG_FILE, encoding="utf-8") as f:
-                return {**defaults, **json.load(f)}
-    except: pass
-    return defaults
 
-CONFIG = _load_config()
+# ============================================================
+#  Platform Entity
+# ============================================================
 
-# --- Networking Constants ---
-UDP_SEND_IP = CONFIG.get("device_ip", "255.255.255.255")
-UDP_SEND_PORT = CONFIG.get("send_port", 50067)
-UDP_LISTEN_PORT = CONFIG.get("recv_port", 50167)
+class Platform:
+    def __init__(self, x, y, w, h, color, keep_alive_sec):
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.color = color
+        self.keep_alive_sec = keep_alive_sec
+        self.last_pressed_time = time.time()
+        self.alive = True
+        self.flash_phase = 0.0
 
-# --- Matrix Constants ---
-NUM_CHANNELS = 8
-LEDS_PER_CHANNEL = 64
-FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
+    @property
+    def timed_out(self):
+        return (time.time() - self.last_pressed_time) > self.keep_alive_sec
 
-# Board Area: Channels 0-6 (Rows 0-27)
-BOARD_WIDTH = 16
-BOARD_HEIGHT = 32
+    @property
+    def time_remaining(self):
+        return max(0.0, self.keep_alive_sec - (time.time() - self.last_pressed_time))
 
-# Input Area
+    @property
+    def urgency(self):
+        """0.0 = just pressed, 1.0 = about to expire."""
+        elapsed = time.time() - self.last_pressed_time
+        return min(1.0, elapsed / self.keep_alive_sec)
 
-# --- Colors (R, G, B) ---
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-YELLOW = (255, 255, 0)
-GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
-CYAN = (0, 255, 255)
-MAGENTA = (255, 0, 255)
-ORANGE = (255, 165, 0)
+    def contains_tile(self, tx, ty):
+        return self.x <= tx < self.x + self.w and self.y <= ty < self.y + self.h
 
-# --- Password for Checksum (Optional, code now uses forced checksums in NetworkManager) ---
-PASSWORD_ARRAY = [
-    35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231, 16, 220, 99, 61, 25, 203, 203, 
-    155, 107, 30, 92, 144, 218, 194, 226, 88, 196, 190, 67, 195, 159, 185, 209, 24, 163, 65, 25, 172, 126, 
-    63, 224, 61, 160, 80, 125, 91, 239, 144, 25, 141, 183, 204, 171, 188, 255, 162, 104, 225, 186, 91, 232, 
-    3, 100, 208, 49, 211, 37, 192, 20, 99, 27, 92, 147, 152, 86, 177, 53, 153, 94, 177, 200, 33, 175, 195, 
-    15, 228, 247, 18, 244, 150, 165, 229, 212, 96, 84, 200, 168, 191, 38, 112, 171, 116, 121, 186, 147, 203, 
-    30, 118, 115, 159, 238, 139, 60, 57, 235, 213, 159, 198, 160, 50, 97, 201, 242, 240, 77, 102, 12, 
-    183, 235, 243, 247, 75, 90, 13, 236, 56, 133, 150, 128, 138, 190, 140, 13, 213, 18, 7, 117, 255, 45, 69, 
-    214, 179, 50, 28, 66, 123, 239, 190, 73, 142, 218, 253, 5, 212, 174, 152, 75, 226, 226, 172, 78, 35, 93, 
-    250, 238, 19, 32, 247, 233, 89, 123, 86, 138, 150, 146, 214, 192, 93, 152, 156, 211, 67, 51, 195, 165, 
-    66, 10, 10, 31, 1, 198, 234, 135, 34, 128, 208, 200, 213, 169, 238, 74, 221, 208, 104, 170, 166, 36, 76, 
-    177, 196, 3, 141, 167, 127, 56, 177, 203, 45, 107, 46, 82, 217, 139, 168, 45, 198, 6, 43, 11, 57, 88, 
-    182, 84, 189, 29, 35, 143, 138, 171
-]
+    def press(self):
+        self.last_pressed_time = time.time()
 
+    def tile_indices(self):
+        """Yield all (x, y) cells that belong to this platform."""
+        for dy in range(self.h):
+            for dx in range(self.w):
+                yield (self.x + dx, self.y + dy)
 
-# Input Configuration
+    def render_color(self):
+        u = self.urgency
+        if u < 0.5:
+            return self.color
+        freq = 2 + int(u * 10)
+        self.flash_phase += 0.05
+        on = (int(self.flash_phase * freq) % 2) == 0
+        if u > 0.85:
+            return RED if on else BLACK
+        return self.color if on else self._dim(self.color, 0.3)
+
+    @staticmethod
+    def _dim(color, factor):
+        return tuple(max(0, int(c * factor)) for c in color)
 
 
-def calculate_checksum(data):
-    acc = sum(data)
-    idx = acc & 0xFF
-    return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
+# ============================================================
+#  SpawnRules – hotspot map for platform placement
+# ============================================================
 
-# --- Classes ---
+class SpawnRules:
+    """
+    Maintains a heat map over the grid of valid 2x2 spawn positions.
+    Each time a platform is placed, nearby positions gain heat while
+    distant ones stay cold.  On spawn, the coldest fraction of candidates
+    is excluded so platforms don't appear in the far opposite corner.
+    """
 
-class NetworkManager:
-    def __init__(self, game):
-        self.game = game
-        self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.running = True
-        self.sequence_number = 0
-        self.prev_button_states = [False] * 64
-        
-        # Auto-Bind Logic: If no bind_ip specified, we stay on 0.0.0.0 (default)
-        bind_ip = CONFIG.get("bind_ip", "0.0.0.0")
-        
-        # We try to bind if a specific IP was requested, but fallback gracefully
-        if bind_ip != "0.0.0.0":
-            try: 
-                self.sock_send.bind((bind_ip, 0))
-            except Exception as e: 
-                print(f"Warning: Could not bind send socket to {bind_ip} (Routing via default): {e}")
-        
-        try:
-            self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.sock_recv.bind(("0.0.0.0", UDP_LISTEN_PORT))
-        except Exception as e:
-            print(f"Critical Error: Could not bind receive socket to port {UDP_LISTEN_PORT}: {e}")
-            self.running = False
+    PLAY_H = 26
+    PW = 2
+    PH = 2
 
-    def send_loop(self):
-        while self.running:
-            frame = self.game.render()
-            self.send_packet(frame)
-            time.sleep(0.05) 
+    def __init__(self, board_w=BOARD_WIDTH, play_h=26, cutoff_fraction=0.25):
+        self.board_w = board_w
+        self.play_h = play_h
+        self.cutoff_fraction = cutoff_fraction
+        self._grid_w = board_w // self.PW
+        self._grid_h = play_h // self.PH
+        self.heat = [[1.0] * self._grid_w for _ in range(self._grid_h)]
 
-    def send_packet(self, frame_data):
-        # Protocol v11 Implementation
-        self.sequence_number = (self.sequence_number + 1) & 0xFFFF
-        if self.sequence_number == 0: self.sequence_number = 1
-        
-        target_ip = UDP_SEND_IP
-        port = UDP_SEND_PORT
-        
-        # --- 1. Start Packet ---
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        start_packet = bytearray([
-            0x75, rand1, rand2, 0x00, 0x08, 
-            0x02, 0x00, 0x00, 0x33, 0x44,   
-            (self.sequence_number >> 8) & 0xFF,
-            self.sequence_number & 0xFF,
-            0x00, 0x00, 0x00 
-        ])
-        start_packet.append(0x0E) # Force Checksum
-        start_packet.append(0x00) 
-        try: 
-            self.sock_send.sendto(start_packet, (target_ip, port))
-            self.sock_send.sendto(start_packet, ("127.0.0.1", port))
-        except: pass
+    def reset(self):
+        for gy in range(self._grid_h):
+            for gx in range(self._grid_w):
+                self.heat[gy][gx] = 1.0
 
-        # --- 2. FFF0 Packet ---
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        
-        # Payload size fixed for 8 channels * 64 LEDs
-        fff0_payload = bytearray()
-        for _ in range(NUM_CHANNELS):
-            fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
+    def _pos_to_grid(self, x, y):
+        return x // self.PW, y // self.PH
 
-        fff0_internal = bytearray([
-            0x02, 0x00, 0x00, 
-            0x88, 0x77, 
-            0xFF, 0xF0, 
-            (len(fff0_payload) >> 8) & 0xFF, (len(fff0_payload) & 0xFF)
-        ]) + fff0_payload
-        
-        fff0_len = len(fff0_internal) - 1
-        
-        fff0_packet = bytearray([
-            0x75, rand1, rand2, 
-            (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)
-        ]) + fff0_internal
-        fff0_packet.append(0x1E) # Force Checksum
-        fff0_packet.append(0x00) 
-        
-        try: 
-            self.sock_send.sendto(fff0_packet, (target_ip, port))
-            self.sock_send.sendto(fff0_packet, ("127.0.0.1", port))
-        except: pass
-        
-        # --- 3. Data Packets ---
-        chunk_size = 984 
-        data_packet_index = 1
-        
-        for i in range(0, len(frame_data), chunk_size):
-            rand1 = random.randint(0, 127)
-            rand2 = random.randint(0, 127)
+    def _grid_to_pos(self, gx, gy):
+        return gx * self.PW, gy * self.PH
 
-            chunk = frame_data[i:i+chunk_size]
-            
-            internal_data = bytearray([
-                0x02, 0x00, 0x00, 
-                (0x8877 >> 8) & 0xFF, (0x8877 & 0xFF), 
-                (data_packet_index >> 8) & 0xFF, (data_packet_index & 0xFF), 
-                (len(chunk) >> 8) & 0xFF, (len(chunk) & 0xFF) 
-            ])
-            internal_data += chunk
-            
-            payload_len = len(internal_data) - 1 
-            
-            packet = bytearray([
-                0x75, rand1, rand2,
-                (payload_len >> 8) & 0xFF, (payload_len & 0xFF)
-            ]) + internal_data
-            
-            if len(chunk) == 984:
-                packet.append(0x1E) 
-            else:
-                packet.append(0x36) 
-                
-            packet.append(0x00)
-            
-            try: 
-                self.sock_send.sendto(packet, (target_ip, port))
-                self.sock_send.sendto(packet, ("127.0.0.1", port))
-            except: pass
-            
-            data_packet_index += 1
-            time.sleep(0.005) # Slight delay
+    def _distance(self, gx1, gy1, gx2, gy2):
+        return ((gx1 - gx2) ** 2 + (gy1 - gy2) ** 2) ** 0.5
 
-        # --- 4. End Packet ---
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        end_packet = bytearray([
-            0x75, rand1, rand2, 0x00, 0x08,
-            0x02, 0x00, 0x00, 0x55, 0x66,
-            (self.sequence_number >> 8) & 0xFF,
-            self.sequence_number & 0xFF,
-            0x00, 0x00, 0x00 
-        ])
-        end_packet.append(0x0E) 
-        end_packet.append(0x00) 
-        try: 
-            self.sock_send.sendto(end_packet, (target_ip, port))
-            self.sock_send.sendto(end_packet, ("127.0.0.1", port))
-        except: pass
+    def update(self, placed_x, placed_y):
+        """Recalculate heat after a platform is placed at (placed_x, placed_y)."""
+        pgx, pgy = self._pos_to_grid(placed_x, placed_y)
+        max_dist = self._distance(0, 0, self._grid_w - 1, self._grid_h - 1)
 
-    def recv_loop(self):
-        while self.running:
-            try:
-                data, _ = self.sock_recv.recvfrom(2048)
-                if len(data) >= 1373 and data[0] == 0x88:
-                    offset = 2 + (7 * 171) + 1 
-                    ch8_data = data[offset : offset + 170]
-                    for led_idx, val in enumerate(ch8_data):
-                        if led_idx >= 64: break
-                        is_pressed = (val == 0xCC)
-                        
-                        # Sync state to game active list
-                        # Logic now handled in Game.tick() -> process_inputs()
-                        self.game.button_states[led_idx] = is_pressed
-                        
-            except Exception:
-                pass
+        for gy in range(self._grid_h):
+            for gx in range(self._grid_w):
+                dist = self._distance(gx, gy, pgx, pgy)
+                proximity = 1.0 - (dist / max_dist)
+                self.heat[gy][gx] += proximity
 
-    def start_bg(self):
-        t1 = threading.Thread(target=self.send_loop)
-        t2 = threading.Thread(target=self.recv_loop)
-        t1.daemon = True
-        t2.daemon = True
-        t1.start()
-        t2.start()
+    def pick(self, engine):
+        """
+        Return (x, y) for a new 2x2 platform, or None if the board is full.
+        Excludes overlapping positions and the coldest `cutoff_fraction` of
+        remaining candidates, then picks randomly weighted by heat.
+        """
+        occupied = set()
+        for ent in engine.entities:
+            if isinstance(ent, Platform):
+                for pos in ent.tile_indices():
+                    occupied.add(pos)
 
-def game_thread_func(game):
-    while game.running:
-        game.tick()
-        time.sleep(0.01)
+        scored = []
+        for gy in range(self._grid_h):
+            for gx in range(self._grid_w):
+                x, y = self._grid_to_pos(gx, gy)
+                cells = [(x + dx, y + dy) for dx in range(self.PW) for dy in range(self.PH)]
+                if any(c in occupied for c in cells):
+                    continue
+                scored.append((x, y, self.heat[gy][gx]))
+
+        if not scored:
+            return None
+
+        scored.sort(key=lambda t: t[2])
+
+        cut = max(1, int(len(scored) * self.cutoff_fraction))
+        if len(scored) - cut < 1:
+            cut = len(scored) - 1
+        viable = scored[cut:]
+
+        weights = [s[2] for s in viable]
+        total_w = sum(weights)
+        if total_w <= 0:
+            choice = random.choice(viable)
+        else:
+            choice = random.choices(viable, weights=weights, k=1)[0]
+
+        return choice[0], choice[1]
+
+
+# ============================================================
+#  Concrete States
+# ============================================================
+
+spawn_rules = SpawnRules()
+
+
+class StartState(GameState):
+    """Attract / countdown screen before the game begins."""
+
+    def __init__(self):
+        self.timer = 0.0
+        self.countdown = 3
+        self.phase = "attract"
+
+    def enter(self, engine: GameEngine):
+        self.timer = 0.0
+        self.phase = "attract"
+        engine.entities.clear()
+        spawn_rules.reset()
+
+    def update(self, engine: GameEngine, dt: float):
+        self.timer += dt
+        engine.clear()
+
+        if self.phase == "attract":
+            pulse = abs((self.timer * 2) % 2.0 - 1.0)
+            brightness = int(80 + 175 * pulse)
+            title_color = (0, brightness, 0)
+            engine.draw_text_large("KEEP", 0, 2, title_color)
+            engine.draw_text_large("ALIVE", 0, 11, title_color)
+
+            engine.draw_text_small("PRESS", 1, 22, WHITE)
+            engine.draw_text_small("START", 1, 28, WHITE)
+
+            if engine.any_pressed():
+                self.phase = "countdown"
+                self.countdown = 3
+                self.timer = 0.0
+
+        elif self.phase == "countdown":
+            num = str(self.countdown)
+            engine.draw_text_large(num, 5, 12, GREEN)
+            if self.timer >= 1.0:
+                self.timer = 0.0
+                self.countdown -= 1
+                if self.countdown < 0:
+                    engine.change_state(SpawnState(round_num=1))
+
+    def exit(self, engine: GameEngine):
+        pass
+
+
+class SpawnState(GameState):
+    """Spawn a new platform, then transition to PlayState."""
+
+    def __init__(self, round_num=1):
+        self.round_num = round_num
+        self.timer = 0.0
+        self.spawned = False
+
+    def enter(self, engine: GameEngine):
+        self.timer = 0.0
+        self.spawned = False
+
+    def update(self, engine: GameEngine, dt: float):
+        self.timer += dt
+        engine.clear()
+
+        if not self.spawned:
+            pos = spawn_rules.pick(engine)
+            if pos is None:
+                engine.change_state(EndState(reason="board_full", round_num=self.round_num))
+                return
+
+            x, y = pos
+            spawn_rules.update(x, y)
+
+            keep_alive = max(3.0, 8.0 - (self.round_num - 1) * 0.4)
+            color = PLATFORM_COLORS[(self.round_num - 1) % len(PLATFORM_COLORS)]
+            plat = Platform(x, y, 2, 2, color, keep_alive)
+            engine.spawn_entity(plat)
+            self.spawned = True
+
+        r_text = f"R{self.round_num}"
+        engine.draw_text_small(r_text, 1, 1, YELLOW)
+
+        for ent in engine.entities:
+            if isinstance(ent, Platform):
+                c = ent.color
+                for tx, ty in ent.tile_indices():
+                    engine.set_pixel(tx, ty, *c)
+
+        if self.timer >= 1.5:
+            engine.change_state(PlayState(round_num=self.round_num))
+
+    def exit(self, engine: GameEngine):
+        pass
+
+
+class PlayState(GameState):
+    """Main gameplay: keep all platforms alive by pressing them before timeout."""
+
+    def __init__(self, round_num=1):
+        self.round_num = round_num
+        self.round_timer = 0.0
+        self.round_duration = max(6.0, 15.0 - (round_num - 1) * 0.5)
+
+    def enter(self, engine: GameEngine):
+        self.round_timer = 0.0
+        for ent in engine.entities:
+            if isinstance(ent, Platform):
+                ent.last_pressed_time = time.time()
+
+    def update(self, engine: GameEngine, dt: float):
+        self.round_timer += dt
+        engine.clear()
+
+        pressed_xy = engine.get_pressed_xy()
+
+        for ent in engine.entities:
+            if isinstance(ent, Platform) and ent.alive:
+                for px, py in pressed_xy:
+                    if ent.contains_tile(px, py):
+                        ent.press()
+                        break
+
+        for ent in engine.entities:
+            if isinstance(ent, Platform) and ent.alive:
+                if ent.timed_out:
+                    ent.alive = False
+                    engine.change_state(EndState(reason="timeout", round_num=self.round_num))
+                    return
+
+        for ent in engine.entities:
+            if isinstance(ent, Platform) and ent.alive:
+                c = ent.render_color()
+                for tx, ty in ent.tile_indices():
+                    engine.set_pixel(tx, ty, *c)
+
+        r_text = f"R{self.round_num}"
+        engine.draw_text_small(r_text, 10, 0, WHITE)
+
+        round_frac = min(1.0, self.round_timer / self.round_duration)
+        engine.draw_progress_bar(0, 27, 16, 1.0 - round_frac, GREEN, (20, 20, 20))
+
+        if self.round_timer >= self.round_duration:
+            engine.change_state(SpawnState(round_num=self.round_num + 1))
+
+    def exit(self, engine: GameEngine):
+        pass
+
+
+class EndState(GameState):
+    """Game over screen."""
+
+    def __init__(self, reason="timeout", round_num=1):
+        self.reason = reason
+        self.round_num = round_num
+        self.timer = 0.0
+
+    def enter(self, engine: GameEngine):
+        self.timer = 0.0
+
+    def update(self, engine: GameEngine, dt: float):
+        self.timer += dt
+        engine.clear()
+
+        on = (int(self.timer * 3) % 2) == 0
+        if on:
+            engine.draw_text_small("GAME", 2, 4, RED)
+            engine.draw_text_small("OVER", 2, 10, RED)
+
+        score_text = str(self.round_num)
+        engine.draw_text_large(score_text, 4, 18, YELLOW)
+
+        if self.timer > 2.0:
+            if engine.any_pressed():
+                engine.entities.clear()
+                engine.change_state(StartState())
+
+    def exit(self, engine: GameEngine):
+        engine.entities.clear()
+
+
+# ============================================================
+#  Main
+# ============================================================
 
 if __name__ == "__main__":
-    game = None
-    net = NetworkManager(game)
-    net.start_bg()
-    
-    gt = threading.Thread(target=game_thread_func, args=(game,))
-    gt.daemon = True
-    gt.start()
-    
-    print("Game 1 Console Server Running.")
-    print("Commands: 'start <num_players>', 'restart', 'quit'")
-    
-    try:
-        while game.running:
-            cmd = input("> ").strip().lower()
-            if cmd == 'quit' or cmd == 'exit':
-                game.running = False
-                break
-            elif cmd.startswith('start'):
-                try:
-                    num = int(cmd.split()[1])
-                    game.start_game(num)
-                    print(f"Started game with {num} players.")
-                except:
-                    print("Usage: start <num_players>")
-            elif cmd == 'restart':
-                game.restart_round()
-                print("Restarted round.")
-            else:
-                 print("Unknown command.")
-    except KeyboardInterrupt:
-        game.running = False
-
-    net.running = False
-    print("Exiting...")
+    config = load_config(_CFG_FILE)
+    game = GameMaster(initial_state_factory=StartState)
+    run_game(game, config=config, title="Game 1 - Keep Alive!")
