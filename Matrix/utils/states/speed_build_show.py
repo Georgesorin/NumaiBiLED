@@ -3,9 +3,11 @@ from ._abs_state import GameState
 from ..ui.colors import *
 from ..data.network import BOARD_WIDTH, BOARD_HEIGHT
 from ..ui.speed_build_ui import (
-    PATTERNS_EASY, PATTERNS_MEDIUM, PLAYER_POSITIONS,
-    get_mosaic_drawing, get_pattern_drawing
+    DIFFICULTY_PATTERNS, DIFFICULTY_MAX_COLORS, ALL_COLORS, PLAYER_POSITIONS,
+    get_mosaic_drawing, get_pattern_drawing, extract_colors
 )
+
+GRAY = (100, 100, 100)
 
 class SBShowState(GameState):
     def __init__(self, settings, spawn_rules, PlayerClass, tied_players=None, **kwargs):
@@ -14,23 +16,30 @@ class SBShowState(GameState):
         self.timer = 0.0
         self.difficulty = int(settings.difficulty)
         
-        # Configure durations based on difficulty
+        # Timing based on difficulty (colors are NOT)
         self.show_duration = 10.0
-        self.colors_to_use = [RED, BLUE, GREEN]
         if self.difficulty == 1:
-            self.show_duration, self.colors_to_use = 15.0, [RED, BLUE]
+            self.show_duration = 15.0
         elif self.difficulty >= 3:
-            self.show_duration, self.colors_to_use = 5.0, [RED, BLUE, GREEN, YELLOW]
-        random.shuffle(self.colors_to_use)
+            self.show_duration = 5.0
+        
+        self.settings.total_time = self.show_duration
+        self.settings.status_text = "MEMORIZE"
 
-        # Build target drawing
-        use_template = random.random() < 0.5
-        if self.difficulty == 1:
-            self.target_drawing = get_pattern_drawing(random.choice(PATTERNS_EASY), self.colors_to_use) if use_template else get_mosaic_drawing(6, self.colors_to_use)
-        elif self.difficulty == 2:
-            self.target_drawing = get_pattern_drawing(random.choice(PATTERNS_MEDIUM), self.colors_to_use) if use_template else get_mosaic_drawing(5, self.colors_to_use)
+        # Build target drawing — cap color pool by difficulty
+        colors = list(ALL_COLORS)
+        random.shuffle(colors)
+        max_colors = DIFFICULTY_MAX_COLORS.get(self.difficulty, len(colors))
+        colors = colors[:max_colors]
+        patterns = DIFFICULTY_PATTERNS.get(self.difficulty, [])
+        use_template = random.random() < 0.5 and len(patterns) > 0
+        if use_template:
+            self.target_drawing = get_pattern_drawing(random.choice(patterns), colors)
         else:
-            self.target_drawing = get_mosaic_drawing(random.randint(1, 4), self.colors_to_use)
+            self.target_drawing = get_mosaic_drawing(random.randint(1, 6), colors)
+
+        # Extract only the colors actually used in this drawing
+        self.colors_to_use = extract_colors(self.target_drawing)
 
         # Setup players
         if tied_players:
@@ -41,7 +50,7 @@ class SBShowState(GameState):
             self.players = [self.PlayerClass(i+1, bases[i][0], bases[i][1]) for i in range(n)]
         
         for p in self.players:
-            p.board = [[BLACK for _ in range(6)] for _ in range(6)]
+            p.board = [[GRAY for _ in range(6)] for _ in range(6)]
             p.completion_time = None
 
     def enter(self, engine):
@@ -54,18 +63,17 @@ class SBShowState(GameState):
 
         if self.timer < self.lobby_duration:
             for p in self.players:
-                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, WHITE)
+                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, DARKER_WHITE)
             return
 
         draw_timer = self.timer - self.lobby_duration
+        self.settings.time_left = max(0.0, self.show_duration - draw_timer)
+        
         for p in self.players:
-            engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, WHITE)
+            engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, DARKER_WHITE)
             for y in range(6):
                 for x in range(6):
                     engine.set_pixel(p.base_x + 1 + x, p.base_y + 1 + y, *self.target_drawing[y][x])
-
-        time_frac = draw_timer / self.show_duration
-        engine.draw_progress_bar(0, BOARD_HEIGHT - 1, BOARD_WIDTH, 1.0 - time_frac, YELLOW, BLACK)
 
         if draw_timer >= self.show_duration: 
             return ("play", {"players": self.players, "target_drawing": self.target_drawing, "colors_to_use": self.colors_to_use})

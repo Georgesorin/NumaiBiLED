@@ -1,7 +1,7 @@
 import random
 from .colors import *
 
-DRAW_COLORS = [RED, BLUE, GREEN]
+ALL_COLORS = [RED, BLUE, GREEN, YELLOW, CYAN, MAGENTA, ORANGE]
 
 PATTERNS_EASY = [
     [[0,0,1,1,0,0],[0,1,1,1,1,0],[1,1,1,1,1,1],[0,1,1,1,1,0],[0,0,2,2,0,0],[0,0,2,2,0,0]],
@@ -15,14 +15,39 @@ PATTERNS_MEDIUM = [
     [[0,0,0,0,0,0],[0,1,0,0,1,0],[0,1,0,0,1,0],[0,0,2,2,0,0],[3,0,0,0,0,3],[0,3,3,3,3,0]]
 ]
 
+PATTERNS_HARD = [
+    # Add your own hard templates here
+]
+
+DIFFICULTY_PATTERNS = {
+    1: PATTERNS_EASY,
+    2: PATTERNS_MEDIUM,
+    3: PATTERNS_HARD,
+}
+
+DIFFICULTY_MAX_COLORS = {
+    1: 3,
+    2: 3,
+    3: 4,
+}
+
 PLAYER_POSITIONS = {
     # 1: [(4, 12)],
     2: [(4, 4), (4, 20)],
-    3: [(0,  0), (0, 24), (8, 12)],
+    3: [(1,  2), (1, 22), (7, 12)],
     4: [(0,  0), (8,  8), (0, 16), (8, 24)],
     5: [(0,  0), (8,  0), (4, 12), (0, 24), (8, 24)],
     6: [(0,  0), (8,  0), (0, 12), (8, 12), (0, 24), (8, 24)],
 }
+
+def extract_colors(drawing):
+    """Return the list of unique non-BLACK colors used in a 6x6 drawing."""
+    colors = set()
+    for row in drawing:
+        for c in row:
+            if c != BLACK:
+                colors.add(c)
+    return list(colors)
 
 def get_mosaic_drawing(mosaic_type, colors):
     drawing = [[BLACK for _ in range(6)] for _ in range(6)]

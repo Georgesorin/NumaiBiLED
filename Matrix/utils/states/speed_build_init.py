@@ -2,28 +2,35 @@ import random
 from ._abs_state import GameState
 from ..ui.colors import *
 from ..ui.speed_build_ui import (
-    PATTERNS_EASY, PATTERNS_MEDIUM, 
+    DIFFICULTY_PATTERNS, DIFFICULTY_MAX_COLORS, ALL_COLORS,
     get_mosaic_drawing, get_pattern_drawing
 )
 
 class SBInitState(GameState):
     def __init__(self, settings, spawn_rules, **kwargs):
         self.settings = settings
+        self.settings.status_text = "LOBBY"
+        self.settings.time_left = 0.0
+        self.settings.total_time = 0.0
         self.display_timer = 0.0
-        self.colors_pool = [RED, BLUE, GREEN, YELLOW, CYAN, MAGENTA, ORANGE]
         self.current_drawing = [[BLACK for _ in range(6)] for _ in range(6)]
 
     def enter(self, engine):
         self._new_drawing()
         
     def _new_drawing(self):
-        random.shuffle(self.colors_pool)
-        use_template = random.random() < 0.5
+        colors = list(ALL_COLORS)
+        random.shuffle(colors)
+        difficulty = int(self.settings.difficulty)
+        max_colors = DIFFICULTY_MAX_COLORS.get(difficulty, len(colors))
+        colors = colors[:max_colors]
+        patterns = DIFFICULTY_PATTERNS.get(difficulty, [])
+        use_template = random.random() < 0.5 and len(patterns) > 0
         if use_template:
-            t = random.choice(PATTERNS_EASY + PATTERNS_MEDIUM)
-            self.current_drawing = get_pattern_drawing(t, self.colors_pool)
+            t = random.choice(patterns)
+            self.current_drawing = get_pattern_drawing(t, colors)
         else:
-            self.current_drawing = get_mosaic_drawing(random.randint(1, 6), self.colors_pool)
+            self.current_drawing = get_mosaic_drawing(random.randint(1, 6), colors)
 
     def update(self, engine, dt: float):
         engine.clear()

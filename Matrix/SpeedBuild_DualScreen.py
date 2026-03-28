@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils/ui"))
 from dual_screen import DualScreenManager
 
 from utils.data import (
-    NetworkManager, game_thread_func, load_config, FRAME_DATA_LENGTH
+    NetworkManager, game_thread_func, load_config, FRAME_DATA_LENGTH, SpeedBuildSettings
 )
 from utils.states import *
 from utils.master import GameMaster
@@ -21,10 +21,7 @@ _CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "matrix_con
 #  Data Objects
 # ============================================================
 
-class SpeedBuildSettings:
-    def __init__(self, player_count, difficulty):
-        self.player_count = player_count
-        self.difficulty = difficulty
+
 
 class DummySpawnRules:
     def reset(self): pass
@@ -66,7 +63,7 @@ def run_speedbuild_with_dual_screen():
         running = True
         while running:
             # Update screens and handle input
-            running = screen_manager.update()
+            running = screen_manager.update(game.settings if game else None)
 
             # Check if game should start
             if screen_manager.is_game_started() and game is None:

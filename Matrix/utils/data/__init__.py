@@ -4,9 +4,10 @@ from utils.data.game_engine import (
     BOARD_WIDTH, BOARD_HEIGHT,
 )
 from utils.data.network import NetworkManager, FRAME_DATA_LENGTH
+from utils.data.speed_build_data import SpeedBuildSettings
 
 __all__ = [
     "GameEngine", "NetworkManager",
     "load_config", "game_thread_func",
-    "BOARD_WIDTH", "BOARD_HEIGHT", "FRAME_DATA_LENGTH"
+    "BOARD_WIDTH", "BOARD_HEIGHT", "FRAME_DATA_LENGTH", "SpeedBuildSettings"
 ]

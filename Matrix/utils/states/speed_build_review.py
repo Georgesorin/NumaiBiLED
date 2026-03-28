@@ -4,6 +4,8 @@ from ..ui.colors import *
 class SBReviewState(GameState):
     def __init__(self, settings, spawn_rules, players, target_drawing, **kwargs):
         self.settings, self.players, self.target_drawing = settings, players, target_drawing
+        self.settings.status_text = "RESULTS"
+        self.settings.time_left = 0.0
         self.timer, self.winner, self.is_tie, self.tied_players = 0.0, None, False, []
 
     def enter(self, engine):
@@ -31,26 +33,26 @@ class SBReviewState(GameState):
                 # Draw score instead of board content (flickering winner)
                 score_color = YELLOW
                 score_text = str(p.score)
-                engine.draw_rect((p.base_x, p.base_y), (8, 8), BLACK)
                 text_width = len(score_text) * 4 - 1
                 center_x = p.base_x + 1 + (6 - text_width) // 2
                 center_y = p.base_y + 3
-                # Draw larger black background around score
-                engine.draw_rect((center_x - 2, center_y - 2), (text_width + 4, 9), BLACK)
+                # Draw black background — cover at least the 6x6 board area
+                rect_x, rect_end = min(p.base_x + 1, center_x - 1), max(p.base_x + 6, center_x + text_width)
+                engine.draw_rect((rect_x, center_y - 2), (rect_end - rect_x + 1, 9), BLACK)
                 engine.draw_text_small(score_text, center_x, center_y, score_color)
             elif p in flash_r:
                 # Draw score instead of board content (flickering ties)
                 score_color = WHITE
                 score_text = str(p.score)
-                engine.draw_rect((p.base_x, p.base_y), (8, 8), BLACK)
                 text_width = len(score_text) * 4 - 1
                 center_x = p.base_x + 1 + (6 - text_width) // 2
                 center_y = p.base_y + 3
-                # Draw larger black background around score
-                engine.draw_rect((center_x - 2, center_y - 2), (text_width + 4, 9), BLACK)
+                # Draw black background — cover at least the 6x6 board area
+                rect_x, rect_end = min(p.base_x + 1, center_x - 1), max(p.base_x + 6, center_x + text_width)
+                engine.draw_rect((rect_x, center_y - 2), (rect_end - rect_x + 1, 9), BLACK)
                 engine.draw_text_small(score_text, center_x, center_y, score_color)
             else:
-                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, WHITE)
+                # No border in review mode, only content
                 for y in range(6):
                     for x in range(6):
                         c = self.target_drawing[y][x] if show_target else p.board[y][x]
@@ -62,8 +64,9 @@ class SBReviewState(GameState):
                 text_width = len(score_text) * 4 - 1
                 center_x = p.base_x + 1 + (6 - text_width) // 2
                 center_y = p.base_y + 2
-                # Draw larger black background for score text to cover top border
-                engine.draw_rect((center_x - 2, center_y - 3), (text_width + 4, 9), BLACK)
+                # Draw black background — cover at least the 6x6 board area
+                rect_x, rect_end = min(p.base_x + 1, center_x - 1), max(p.base_x + 6, center_x + text_width)
+                engine.draw_rect((rect_x, center_y - 2), (rect_end - rect_x + 1, 8), BLACK)
                 engine.draw_text_small(score_text, center_x, center_y, score_color)
 
         if self.timer > 5.0 and engine.any_pressed():

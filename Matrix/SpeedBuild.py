@@ -6,7 +6,7 @@ import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils.data import (
-    NetworkManager, game_thread_func, load_config
+    NetworkManager, game_thread_func, load_config, SpeedBuildSettings
 )
 from utils.states import *
 from utils.master import GameMaster
@@ -17,10 +17,7 @@ _CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "matrix_con
 #  Data Objects
 # ============================================================
 
-class SpeedBuildSettings:
-    def __init__(self, player_count, difficulty):
-        self.player_count = player_count
-        self.difficulty = difficulty
+
 
 class DummySpawnRules:
     def reset(self): pass
