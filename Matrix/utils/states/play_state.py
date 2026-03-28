@@ -4,7 +4,30 @@ from ..tile import Tile
 from ..ui.colors import *
 
 from ..scaling.spawn_rules import SpawnRules
-import math
+
+DARK_BLUE = (0, 0, 100)
+
+def _build_thick_border_one_lap(board_w, board_h, thickness):
+    """One clockwise lap; each step along the frame adds `thickness` deep pixels."""
+    w, h = board_w, board_h
+    t = thickness
+    pts = []
+    for x in range(w):
+        for k in range(t):
+            pts.append((x, k))
+    for y in range(t, h - t):
+        for k in range(t):
+            pts.append((w - 1 - k, y))
+    for x in range(w - 1, -1, -1):
+        for k in range(t):
+            pts.append((x, h - 1 - k))
+    for y in range(h - t - 1, t - 1, -1):
+        for k in range(t):
+            pts.append((k, y))
+    return pts
+
+
+_THICK_BORDER_16x32 = _build_thick_border_one_lap(16, 32, thickness=2)
 
 class PlayState(GameState):
     """Main gameplay: keep all platforms alive by pressing them before timeout."""
@@ -15,8 +38,8 @@ class PlayState(GameState):
         self.round_num = round_num
         self.round_timer_curr = 0.0
         self.round_duration = settings.get_round_timer(round_num)
-        self.border_frac = 0.0
-        self.border_hold = 0.0
+        self.border_path = _THICK_BORDER_16x32
+        self.border_path_len = len(self.border_path)
 
     def enter(self, engine):
         self.round_timer_curr = 0.0
@@ -25,21 +48,16 @@ class PlayState(GameState):
             if isinstance(ent, Tile):
                 ent.timeout_duration = keep_alive
                 ent.last_pressed_time = time.time()
-        # Reset border color to blue immediately when entering play
-        engine.draw_rect_outline_scaled(0, 0, 16, 32, BLUE, 1.0, thickness=2)
-        self.border_frac = 0.0
-        # Hold the blue border for a short time to avoid visual flash
-        self.border_hold = 0.15
 
     def update(self, engine, dt: float):
         self.round_timer_curr += dt
         engine.clear()
 
-        pressed_xy = engine.get_pressed_xy()
+        held_xy = engine.get_held_xy()
 
         for ent in engine.entities:
             if isinstance(ent, Tile) and ent.alive:
-                for px, py in pressed_xy:
+                for px, py in held_xy:
                     if ent.contains_tile(px, py):
                         ent.press()
                         break
@@ -56,29 +74,19 @@ class PlayState(GameState):
                 for tx, ty in ent.get_position():
                     engine.set_pixel(tx, ty, *c)
 
-        # r_text = f"R{self.round_num}"
-        # engine.draw_text_small(r_text, 10, 0, WHITE)
-
         round_frac = min(1.0, self.round_timer_curr / self.round_duration)
 
-        # If we're still in the initial hold period, keep border blue.
-        if self.border_hold > 0.0:
-            self.border_hold = max(0.0, self.border_hold - dt)
-            engine.draw_rect_outline_scaled(0, 0, 16, 32, BLUE, 1.0, thickness=2)
-        else:
-            # Smooth the visual border fraction using exponential smoothing
-            # `tau` is the time constant in seconds; larger tau => slower smoothing.
-            tau = 0.6
-            alpha = 1.0 - math.exp(-dt / tau) if dt > 0 else 0.0
-            self.border_frac += (round_frac - self.border_frac) * alpha
+        filled = int(round_frac * self.border_path_len)
+        filled = filled - (filled % 2)
 
-            # Border acts as the timer: color shifts from BLUE -> YELLOW and brightness increases.
-            r = int(BLUE[0] + self.border_frac * (YELLOW[0] - BLUE[0]))
-            g = int(BLUE[1] + self.border_frac * (YELLOW[1] - BLUE[1]))
-            b = int(BLUE[2] + self.border_frac * (YELLOW[2] - BLUE[2]))
-            border_color = (r, g, b)
-            brighten_factor = 1.0 + self.border_frac * 1.0
-            engine.draw_rect_outline_scaled(0, 0, 16, 32, border_color, brighten_factor, thickness=2)
+        tr = round_frac
+        r = int(DARK_BLUE[0] + tr * (CYAN[0] - DARK_BLUE[0]))
+        g = int(DARK_BLUE[1] + tr * (CYAN[1] - DARK_BLUE[1]))
+        b = int(DARK_BLUE[2] + tr * (CYAN[2] - DARK_BLUE[2]))
+
+        for i in range(filled):
+            px, py = self.border_path[i]
+            engine.set_pixel(px, py, r, g, b)
 
         if self.round_timer_curr >= self.round_duration:
             return ("spawn", {"round_num": self.round_num + 1})

@@ -7,9 +7,13 @@ class SpawnRules:
     """
     Heat map over the grid of valid 2x2 spawn positions.
 
-    `cutoff_fraction` controls how aggressively far-away spots are
-    preferred.  Higher values (hard/nightmare) cut more of the "cold"
-    (close) candidates, pushing new spawns further from existing ones.
+    `cutoff_fraction` is the fraction of candidates discarded for being
+    too "hot" (closest to existing platforms).  Higher values keep a
+    smaller, colder pool so spawns stay farther apart on hard modes.
+
+    Within that pool we pick among the lowest-heat cells only (the
+    coldest), so spawns hug the "far away" side of the cutoff instead
+    of sampling randomly toward hotter (closer) tiles.
 
     `heat_spread` scales how much heat a placement radiates.
     Lower values make the heat map more local, so consecutive spawns
@@ -79,19 +83,17 @@ class SpawnRules:
         if not scored:
             return None
 
+        # Lower heat = farther from prior placements (see update()).
         scored.sort(key=lambda t: t[2])
 
-        cut = max(1, int(len(scored) * self.cutoff_fraction))
-        if len(scored) - cut < 1:
-            cut = len(scored) - 1
-        viable = scored[cut:]
+        discard = int(len(scored) * self.cutoff_fraction)
+        discard = min(max(0, discard), len(scored) - 1)
+        keep = len(scored) - discard
+        viable = scored[:keep]
 
-        weights = [s[2] for s in viable]
-        total_w = sum(weights)
-        if total_w <= 0:
-            choice = random.choice(viable)
-        else:
-            choice = random.choices(viable, weights=weights, k=1)[0]
+        min_h = viable[0][2]
+        best = [s for s in viable if s[2] == min_h]
+        choice = random.choice(best)
 
         return choice[0], choice[1]
 
