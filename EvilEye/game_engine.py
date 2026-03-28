@@ -171,90 +171,91 @@ def build_frame_data(led_states):
 
 
 # ============================================================
-#  NetworkManager
+#  Discovery
 # ============================================================
 
-DISCOVERY_SEND_IP   = "169.254.182.11"
-DISCOVERY_SEND_PORT = 4626
-DISCOVERY_RECV_PORT = 7800
-DISCOVERY_DEADLINE  = 5.0
+def get_local_interfaces():
+    """Return list of (iface_name, ip, broadcast_addr) for active IPv4 interfaces."""
+    results = []
+    try:
+        import psutil
+        for iface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
+                    bcast = addr.broadcast if addr.broadcast else "255.255.255.255"
+                    results.append((iface, addr.address, bcast))
+    except ImportError:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if ip != "127.0.0.1":
+                results.append(("?", ip, "255.255.255.255"))
+    return results
 
 
-def _build_discovery_packet():
-    """Build a 0x67 discovery packet matching the Controller protocol."""
-    rand1 = random.randint(0, 127)
-    rand2 = random.randint(0, 127)
-    payload = bytes([
-        0x0A, 0x02,
-        0x4B, 0x58, 0x2D, 0x48, 0x43, 0x30, 0x34,   # "KX-HC04"
-        0x03, 0x00, 0x00,
-        0xFF, 0xFF,
-        0x00, 0x00, 0x00, 0x14,
-    ])
-    pkt = bytearray([0x67, rand1, rand2, len(payload)] + list(payload))
-    idx = sum(pkt) & 0xFF
-    pkt.append(PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0)
-    return bytes(pkt), rand1, rand2
+def build_discovery_packet():
+    rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
+    payload = bytearray([0x0A, 0x02, *b"KX-HC04", 0x03, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x14])
+    pkt = bytearray([0x67, rand1, rand2, len(payload)]) + payload
+    pkt.append(calculate_checksum(pkt))
+    return pkt, rand1, rand2
 
 
-def discover_evil_eye(deadline=DISCOVERY_DEADLINE):
-    """
-    Send a 0x67 discovery packet to DISCOVERY_SEND_IP:DISCOVERY_SEND_PORT and
-    listen for 0x68 responses on 255.255.255.255:DISCOVERY_RECV_PORT.
-
-    Collects devices for *deadline* seconds.
-    Returns a list of dicts: [{"ip": ..., "mac": ..., "model": ...}, ...]
-    """
-    pkt, rand1, rand2 = _build_discovery_packet()
-
+def run_discovery_flow():
+    interfaces = get_local_interfaces()
+    if not interfaces:
+        print("No active network interfaces found.")
+        return None
+    print("\n--- Network Selection ---")
+    for i, (iface, ip, bcast) in enumerate(interfaces):
+        print(f"[{i}] {iface} - {ip}")
+    try:
+        choice = int(input("\nSelect interface number: "))
+        sel = interfaces[choice]
+    except Exception:
+        sel = interfaces[0]
+        print("Invalid choice, defaulting to 0.")
+    print(f"Using {sel[0]} ({sel[1]})")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((sel[1], 7800))
+    except Exception:
+        pass
+
+    pkt, r1, r2 = build_discovery_packet()
+    try:
+        sock.sendto(pkt, (sel[2], 4626))
+    except Exception:
+        return None
+
+    print("Listening for devices...")
     sock.settimeout(0.5)
-
-    try:
-        sock.bind(("0.0.0.0", DISCOVERY_RECV_PORT))
-    except Exception as e:
-        print(f"[Discovery] Bind error on 0.0.0.0:{DISCOVERY_RECV_PORT}: {e}")
-        sock.close()
-        return []
-
-    print(f"[Discovery] Sending 0x67 to {DISCOVERY_SEND_IP}:{DISCOVERY_SEND_PORT}")
-    try:
-        sock.sendto(pkt, (DISCOVERY_SEND_IP, DISCOVERY_SEND_PORT))
-    except Exception as e:
-        print(f"[Discovery] Send error: {e}")
-        sock.close()
-        return []
-
+    end_time = time.time() + 3
     devices = []
-    end_time = time.time() + deadline
     while time.time() < end_time:
         try:
-            data, addr = sock.recvfrom(256)
+            data, addr = sock.recvfrom(1024)
+            if len(data) >= 30 and data[0] == 0x68 and data[1] == r1 and data[2] == r2:
+                if addr[0] not in [d['ip'] for d in devices]:
+                    model = data[6:13].decode(errors='ignore').strip('\x00')
+                    devices.append({'ip': addr[0], 'model': model})
+                    print(f"Found {model} at {addr[0]}")
         except socket.timeout:
             continue
         except Exception:
-            break
-
-        if len(data) >= 30 and data[0] == 0x68 and data[1] == rand1 and data[2] == rand2:
-            model = data[6:13].rstrip(b'\x00').decode('ascii', errors='replace')
-            mac = ":".join(f"{b:02X}" for b in data[13:19])
-            dev_type = data[20] if len(data) > 20 else 0
-            if not any(d["ip"] == addr[0] for d in devices):
-                devices.append({
-                    "ip": addr[0],
-                    "mac": mac,
-                    "model": model,
-                    "type": dev_type,
-                })
-                print(f"[Discovery] Found {model} (HC0{dev_type}) at {addr[0]}  MAC: {mac}")
-
+            pass
     sock.close()
-    if not devices:
-        print("[Discovery] No Evil Eye controllers found.")
-    return devices
+    if devices:
+        print(f"Targeting {devices[0]['ip']}\n")
+        return devices[0]['ip']
+    print("No devices found, using default config.\n")
+    return None
 
+
+# ============================================================
+#  NetworkManager
+# ============================================================
 
 class NetworkManager:
     """
@@ -274,9 +275,9 @@ class NetworkManager:
         self._seq = 0
         self._lock = threading.Lock()
 
-        self.send_ip = config.get("device_ip", "255.255.255.255")
-        self.send_port = config.get("send_port", 50267)
-        self.recv_port = config.get("recv_port", 50367)
+        self.send_ip = config.get("device_ip", "169.254.182.44")
+        self.send_port = config.get("send_port", 4626)
+        self.recv_port = config.get("recv_port", 7800)
         self.bind_ip = config.get("bind_ip", "0.0.0.0")
         self.poll_rate_ms = config.get("polling_rate_ms", 100)
 
@@ -585,11 +586,10 @@ def run_game(game_master, config=None, title="Evil Eye Game",
         config = load_config()
 
     if discover:
-        devices = discover_evil_eye()
-        if devices:
-            config["device_ip"] = devices[0]["ip"]
-            print(f"Using discovered device at {devices[0]['ip']} "
-                  f"({devices[0]['model']})")
+        discovered_ip = run_discovery_flow()
+        if discovered_ip:
+            config["device_ip"] = discovered_ip
+            print(f"Using discovered device at {discovered_ip}")
         else:
             print("Continuing with configured device_ip...")
 
@@ -617,11 +617,10 @@ def run_game(game_master, config=None, title="Evil Eye Game",
                 game_master.restart()
                 print("Restarted.")
             elif cmd == "discover":
-                devices = discover_evil_eye()
-                if devices:
-                    net.send_ip = devices[0]["ip"]
-                    print(f"Updated target to {devices[0]['ip']} "
-                          f"({devices[0]['model']})")
+                discovered_ip = run_discovery_flow()
+                if discovered_ip:
+                    net.send_ip = discovered_ip
+                    print(f"Updated target to {discovered_ip}")
                 else:
                     print("No device found.")
             else:
