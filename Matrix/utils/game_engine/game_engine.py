@@ -19,6 +19,8 @@ import json
 import sys
 from abc import ABC, abstractmethod
 
+from ..ui.colors import *
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from small_font import FONT_3x5
 from matrix_font import FONT_5x7
@@ -57,16 +59,6 @@ FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
 
 BOARD_WIDTH = 16
 BOARD_HEIGHT = 32
-
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-YELLOW = (255, 255, 0)
-GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
-CYAN = (0, 255, 255)
-MAGENTA = (255, 0, 255)
-ORANGE = (255, 165, 0)
 
 PASSWORD_ARRAY = [
     35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231, 16, 220, 99, 61, 25, 203, 203,
@@ -376,7 +368,9 @@ class GameEngine:
                         self.set_pixel(cx + col_idx, start_y + row, *color)
             cx += len(cols) + 1
 
-    def draw_rect(self, x, y, w, h, color):
+    def draw_rect(self, position, dimensions, color):
+        x, y = position
+        w, h = dimensions
         for dy in range(h):
             for dx in range(w):
                 self.set_pixel(x + dx, y + dy, *color)
@@ -394,56 +388,6 @@ class GameEngine:
         for dx in range(w):
             c = fg_color if dx < filled else bg_color
             self.set_pixel(x + dx, y, *c)
-
-
-# ============================================================
-#  Abstract GameState
-# ============================================================
-
-class GameState(ABC):
-    @abstractmethod
-    def enter(self, engine: GameEngine):
-        pass
-
-    @abstractmethod
-    def update(self, engine: GameEngine, dt: float):
-        pass
-
-    @abstractmethod
-    def exit(self, engine: GameEngine):
-        pass
-
-
-# ============================================================
-#  GameMaster – owns the engine, drives the state machine
-# ============================================================
-
-class GameMaster:
-    """
-    Instantiate with `initial_state_factory`, a callable that returns the
-    first GameState to enter (e.g. ``lambda: MyStartState()``).
-    """
-
-    def __init__(self, initial_state_factory):
-        self.engine = GameEngine()
-        self.running = True
-        self.button_states = self.engine.button_states
-        self._initial_state_factory = initial_state_factory
-        self.engine.change_state(initial_state_factory())
-
-    def tick(self, dt: float):
-        state = self.engine.state
-        if state is not None:
-            state.update(self.engine, dt)
-        self.engine.snapshot_input()
-
-    def render(self):
-        return self.engine.render()
-
-    def restart(self):
-        self.engine.entities.clear()
-        self.engine.change_state(self._initial_state_factory())
-
 
 # ============================================================
 #  Game-loop helper
