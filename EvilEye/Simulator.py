@@ -9,7 +9,7 @@ import psutil
 from datetime import datetime
 
 # --- Configuration ---
-_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eye_sim_config.json")
+_CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eye_sim_config.json")
 
 def _load_config():
     defaults = {

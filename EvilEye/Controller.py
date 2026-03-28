@@ -940,6 +940,10 @@ class ConfigDialog(tk.Toplevel):
         self._on_save = on_save
 
         self._sv_auto_stream = tk.BooleanVar(value=cfg.get("auto_start_streaming", False))
+        self._sv_ip = tk.StringVar(value=cfg.get("device_ip", "255.255.255.255"))
+        self._sv_udp = tk.StringVar(value=cfg.get("udp_port", "4626"))
+        self._sv_recv = tk.StringVar(value=cfg.get("receiver_port", "7800"))
+        self._sv_poll = tk.StringVar(value=cfg.get("polling_rate_ms", "100"))
 
         self._build()
 
