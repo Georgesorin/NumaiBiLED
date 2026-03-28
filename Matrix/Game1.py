@@ -9,7 +9,8 @@ from utils.data import (
 
 from utils.scaling import SpawnRules
 
-from utils.states import *
+from utils.states import GameStartState, InitialTilePatternState, TileSpawnState, PlayState, GameOverState
+
 from utils.master import GameMaster
 from utils.ui import prompt_settings, prompt_render
 
