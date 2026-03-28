@@ -47,6 +47,11 @@ class SBPlayState(GameState):
                 for cx in range(6): engine.set_pixel(p.base_x + 1 + cx, p.base_y + 1 + cy, *p.board[cy][cx])
 
         engine.draw_progress_bar(0, BOARD_HEIGHT - 1, BOARD_WIDTH, 1.0 - self.timer / self.play_duration, YELLOW, BLACK)
+        
+        # Check if all players have perfect scores
+        if all(p.completion_time is not None for p in self.players):
+            return ("review", {"players": self.players, "target_drawing": self.target_drawing})
+        
         if self.timer >= self.play_duration:
             return ("review", {"players": self.players, "target_drawing": self.target_drawing})
 

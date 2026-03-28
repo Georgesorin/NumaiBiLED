@@ -7,16 +7,10 @@ from ..ui.speed_build_ui import (
     get_mosaic_drawing, get_pattern_drawing
 )
 
-# This needs a Player class. I'll pass it in kwargs or define it in a shared place.
-# For now, I'll assume it's passed in the factory or imported.
-# Actually, let's define the Player class in a shared speed_build_entities.py if needed, 
-# or just in the main speed_build.py and import it? 
-# The user wants "clean code". Let's put Player in utils/scaling/speed_build_entities.py
-
 class SBShowState(GameState):
     def __init__(self, settings, spawn_rules, PlayerClass, tied_players=None, **kwargs):
         self.settings = settings
-        self.PlayerClass = PlayerClass # Pass the class to avoid circular imports if needed
+        self.PlayerClass = PlayerClass
         self.timer = 0.0
         self.difficulty = int(settings.difficulty)
         
@@ -52,7 +46,7 @@ class SBShowState(GameState):
 
     def enter(self, engine):
         self.timer = 0.0
-        self.lobby_duration = 5.0
+        self.lobby_duration = 2.0
 
     def update(self, engine, dt: float):
         self.timer += dt
@@ -60,8 +54,7 @@ class SBShowState(GameState):
 
         if self.timer < self.lobby_duration:
             for p in self.players:
-                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, CYAN)
-                engine.draw_text_small(str(p.id), p.base_x + 3, p.base_y + 2, WHITE)
+                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, WHITE)
             return
 
         draw_timer = self.timer - self.lobby_duration

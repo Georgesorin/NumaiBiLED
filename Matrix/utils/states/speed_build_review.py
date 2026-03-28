@@ -28,19 +28,43 @@ class SBReviewState(GameState):
 
         for p in self.players:
             if p in flash_y:
-                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, YELLOW)
-                for cy in range(6):
-                    for cx in range(6): engine.set_pixel(p.base_x + 1 + cx, p.base_y + 1 + cy, *YELLOW)
+                # Draw score instead of board content (flickering winner)
+                score_color = YELLOW
+                score_text = str(p.score)
+                engine.draw_rect((p.base_x, p.base_y), (8, 8), BLACK)
+                text_width = len(score_text) * 4 - 1
+                center_x = p.base_x + 1 + (6 - text_width) // 2
+                center_y = p.base_y + 3
+                # Draw larger black background around score
+                engine.draw_rect((center_x - 2, center_y - 2), (text_width + 4, 9), BLACK)
+                engine.draw_text_small(score_text, center_x, center_y, score_color)
             elif p in flash_r:
-                engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, RED)
-                for cy in range(6):
-                    for cx in range(6): engine.set_pixel(p.base_x + 1 + cx, p.base_y + 1 + cy, *RED)
+                # Draw score instead of board content (flickering ties)
+                score_color = WHITE
+                score_text = str(p.score)
+                engine.draw_rect((p.base_x, p.base_y), (8, 8), BLACK)
+                text_width = len(score_text) * 4 - 1
+                center_x = p.base_x + 1 + (6 - text_width) // 2
+                center_y = p.base_y + 3
+                # Draw larger black background around score
+                engine.draw_rect((center_x - 2, center_y - 2), (text_width + 4, 9), BLACK)
+                engine.draw_text_small(score_text, center_x, center_y, score_color)
             else:
                 engine.draw_rect_outline(p.base_x, p.base_y, 8, 8, WHITE)
                 for y in range(6):
                     for x in range(6):
                         c = self.target_drawing[y][x] if show_target else p.board[y][x]
                         engine.set_pixel(p.base_x + 1 + x, p.base_y + 1 + y, *c)
+
+                # Display player score inside the player box, centered. Winner gets yellow text.
+                score_color = YELLOW if (self.winner == p and not self.is_tie) else WHITE
+                score_text = str(p.score)
+                text_width = len(score_text) * 4 - 1
+                center_x = p.base_x + 1 + (6 - text_width) // 2
+                center_y = p.base_y + 2
+                # Draw larger black background for score text to cover top border
+                engine.draw_rect((center_x - 2, center_y - 3), (text_width + 4, 9), BLACK)
+                engine.draw_text_small(score_text, center_x, center_y, score_color)
 
         if self.timer > 5.0 and engine.any_pressed():
             return ("show", {"tied_players": self.tied_players}) if self.is_tie else ("init", {})

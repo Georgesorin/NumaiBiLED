@@ -27,6 +27,10 @@ class SBInitState(GameState):
 
     def update(self, engine, dt: float):
         engine.clear()
+        pressed = engine.get_pressed_xy()
+        if any(1 <= x <= 17 and 12 <= y <= 18 for x, y in pressed):
+            return ("show", {})
+
         self.display_timer += dt
         if self.display_timer >= 2.0:
             self.display_timer = 0.0
