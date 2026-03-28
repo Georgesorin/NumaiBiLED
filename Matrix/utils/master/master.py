@@ -1,4 +1,4 @@
-from ..game_engine import GameEngine
+from ..data.game_engine import GameEngine
 
 class GameMaster:
     def __init__(self, initial_state_factory, settings, spawn_rules, transitions):
