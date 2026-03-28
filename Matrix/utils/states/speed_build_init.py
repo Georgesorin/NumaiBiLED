@@ -5,6 +5,9 @@ from ..ui.speed_build_ui import (
     DIFFICULTY_PATTERNS, DIFFICULTY_MAX_COLORS, ALL_COLORS,
     get_mosaic_drawing, get_pattern_drawing
 )
+from ..data.audio_manager import get_audio_manager
+
+_audio = get_audio_manager()
 
 class SBInitState(GameState):
     def __init__(self, settings, spawn_rules, **kwargs):
@@ -16,6 +19,11 @@ class SBInitState(GameState):
         self.current_drawing = [[BLACK for _ in range(6)] for _ in range(6)]
 
     def enter(self, engine):
+        # Stop any intro/start music when the GO screen is shown
+        try:
+            _audio.stop_music(fade_ms=400)
+        except Exception:
+            pass
         self._new_drawing()
         
     def _new_drawing(self):

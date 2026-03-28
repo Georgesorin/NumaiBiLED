@@ -8,6 +8,11 @@ from ..ui.speed_build_ui import (
 )
 
 GRAY = (100, 100, 100)
+import os
+try:
+    import pygame
+except Exception:
+    pygame = None
 
 class SBShowState(GameState):
     def __init__(self, settings, spawn_rules, PlayerClass, tied_players=None, **kwargs):
@@ -53,6 +58,30 @@ class SBShowState(GameState):
             p.board = [[GRAY for _ in range(6)] for _ in range(6)]
             p.completion_time = None
 
+        # Audio state
+        self._pygame = pygame
+        self.start_music_loaded = False
+        self.start_music_started = False
+        self.start_music_volume = 0.7
+
+    def _init_start_music(self):
+        if not self._pygame:
+            return
+        try:
+            if not self._pygame.mixer.get_init():
+                self._pygame.mixer.init()
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets'))
+            music_path = os.path.join(base, 'music', 'speed_build_start.mp3')
+            if os.path.exists(music_path):
+                try:
+                    self._pygame.mixer.music.load(music_path)
+                    self._pygame.mixer.music.set_volume(self.start_music_volume)
+                    self.start_music_loaded = True
+                except Exception:
+                    self.start_music_loaded = False
+        except Exception:
+            self.start_music_loaded = False
+
     def enter(self, engine):
         self.timer = 0.0
         self.lobby_duration = 2.0
@@ -67,6 +96,16 @@ class SBShowState(GameState):
             return
 
         draw_timer = self.timer - self.lobby_duration
+        # Start the intro/start music when the drawings are first shown
+        if not self.start_music_started:
+            # Use central audio manager to play the start track with a gentle fade
+            from ..data.audio_manager import get_audio_manager
+            _audio = get_audio_manager()
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets'))
+            music_path = os.path.join(base, 'music', 'speed_build_start.mp3')
+            _audio.play_music(music_path, loop=0, fade_ms=200)
+            self.start_music_started = True
+
         self.settings.time_left = max(0.0, self.show_duration - draw_timer)
         
         for p in self.players:

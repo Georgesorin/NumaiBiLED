@@ -1,5 +1,10 @@
 from ._abs_state import GameState
 from ..ui.colors import *
+import os
+try:
+    import pygame
+except Exception:
+    pygame = None
 
 class SBReviewState(GameState):
     def __init__(self, settings, spawn_rules, players, target_drawing, **kwargs):
@@ -20,6 +25,15 @@ class SBReviewState(GameState):
             tied = [p for p in self.players if p.score == best.score]
             if len(tied) > 1: self.is_tie, self.tied_players = True, tied
             else: self.winner = best
+        # Play end music once when review starts (crossfade)
+        try:
+            from ..data.audio_manager import get_audio_manager
+            _audio = get_audio_manager()
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets'))
+            music_path = os.path.join(base, 'music', 'speed_build_end.mp3')
+            _audio.play_music(music_path, loop=0, fade_ms=305)
+        except Exception:
+            pass
 
     def update(self, engine, dt: float):
         self.timer += dt

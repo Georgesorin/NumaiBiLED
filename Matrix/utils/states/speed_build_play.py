@@ -2,6 +2,13 @@ from ._abs_state import GameState
 from ..ui.colors import *
 from ..data.network import BOARD_WIDTH, BOARD_HEIGHT
 import math
+import os
+from ..data.audio_manager import get_audio_manager
+_audio = get_audio_manager()
+try:
+    import pygame
+except Exception:
+    pygame = None
 
 GRAY = (100, 100, 100)
 
@@ -28,7 +35,56 @@ class SBPlayState(GameState):
         self.settings.total_time = self.play_duration
         self.settings.status_text = "BUILD"
 
-    def enter(self, engine): pass
+        # Audio placeholders
+        self._pygame = pygame
+        self.music_loaded = False
+        self.sfxs = None
+        self.sfx_index = 0
+        self.music_volume = 0.6
+
+    def enter(self, engine):
+        # Initialize audio (load SFX) then start play music (crossfade from any intro music)
+        try:
+            self._init_audio()
+        except Exception:
+            pass
+        base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets'))
+        music_path = os.path.join(base, 'music', 'speed_build_music.mp3')
+        _audio.play_music(music_path, loop=-1, fade_ms=600)
+
+    def _init_audio(self):
+        if not self._pygame:
+            return
+        try:
+            # Initialize mixer if needed
+            if not self._pygame.mixer.get_init():
+                self._pygame.mixer.init()
+
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets'))
+            music_path = os.path.join(base, 'music', 'speed_build_music.mp3')
+            sfx1 = os.path.join(base, 'sfx', 'speed_build_change_color_1.wav')
+            sfx2 = os.path.join(base, 'sfx', 'speed_build_change_color_2.wav')
+
+            if os.path.exists(music_path):
+                try:
+                    self._pygame.mixer.music.load(music_path)
+                    self._pygame.mixer.music.set_volume(self.music_volume)
+                    self.music_loaded = True
+                except Exception:
+                    self.music_loaded = False
+
+            sfx_list = []
+            for p in (sfx1, sfx2):
+                if os.path.exists(p):
+                    try:
+                        sfx_list.append(self._pygame.mixer.Sound(p))
+                    except Exception:
+                        pass
+            self.sfxs = sfx_list if sfx_list else None
+            self.sfx_index = 0
+        except Exception:
+            self.sfxs = None
+            self.music_loaded = False
 
     def _blend_color(self, color, factor):
         """Blend color with black based on factor (0.0 to 1.0) for darker shades"""
@@ -58,6 +114,13 @@ class SBPlayState(GameState):
         if self.color_timer >= self.cycle_time:
             self.color_timer, self.color_index = 0.0, (self.color_index + 1) % len(self.draw_colors)
             self.active_color = self.draw_colors[self.color_index]
+            # Play one SFX per color change, cycling between available sfx
+            if self.sfxs:
+                try:
+                    self.sfxs[self.sfx_index].play()
+                    self.sfx_index = (self.sfx_index + 1) % len(self.sfxs)
+                except Exception:
+                    pass
 
         engine.clear()
         pressed = engine.get_pressed_xy()
@@ -109,4 +172,6 @@ class SBPlayState(GameState):
         if self.timer >= self.play_duration:
             return ("review", {"players": self.players, "target_drawing": self.target_drawing})
 
-    def exit(self, engine): pass
+    def exit(self, engine):
+        # Fade out music when leaving play
+        _audio.stop_music(fade_ms=600)
