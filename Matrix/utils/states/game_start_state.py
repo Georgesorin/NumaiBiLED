@@ -50,9 +50,6 @@ class GameStartState(GameState):
                 c = plat.color if blink else self._dim(plat.color, 0.25)
                 engine.draw_rect(plat.position, plat.dimensions, c)
 
-        touched = sum(1 for p in platforms if p.ever_pressed)
-        engine.draw_text_small(f"{touched}/{len(platforms)}", 1, 0, WHITE)
-
         if all_touched:
             return ("play", {"round_num": 1})
 

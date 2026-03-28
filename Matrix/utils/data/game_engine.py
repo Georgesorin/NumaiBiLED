@@ -24,6 +24,35 @@ class GameEngine:
             self.buffer[offset + 8] = r
             self.buffer[offset + 16] = b
 
+    def get_pixel(self, x, y):
+        """Return (r,g,b) for pixel at x,y. Returns (0,0,0) if out of bounds."""
+        if x < 0 or x >= BOARD_WIDTH or y < 0 or y >= BOARD_HEIGHT:
+            return (0, 0, 0)
+        channel = y // 4
+        row = y % 4
+        idx = (row * 16 + x) if row % 2 == 0 else (row * 16 + (15 - x))
+        offset = idx * 24 + channel
+        if offset + 16 < len(self.buffer):
+            g = self.buffer[offset]
+            r = self.buffer[offset + 8]
+            b = self.buffer[offset + 16]
+            return (r, g, b)
+        return (0, 0, 0)
+
+    def brighten_region(self, x, y, w, h, factor):
+        """Brighten pixels in region by multiplying RGB by factor (clamped 0..255)."""
+        if factor <= 0:
+            return
+        for dy in range(h):
+            for dx in range(w):
+                px = x + dx
+                py = y + dy
+                r, g, b = self.get_pixel(px, py)
+                nr = min(255, int(r * factor))
+                ng = min(255, int(g * factor))
+                nb = min(255, int(b * factor))
+                self.set_pixel(px, py, nr, ng, nb)
+
     def clear(self):
         for i in range(len(self.buffer)):
             self.buffer[i] = 0
@@ -123,6 +152,30 @@ class GameEngine:
         for dy in range(h):
             self.set_pixel(x, y + dy, *color)
             self.set_pixel(x + w - 1, y + dy, *color)
+
+    def draw_rect_outline_scaled(self, x, y, w, h, color, factor, thickness=1):
+        """Draw an outline with the given thickness, scaling the base color by factor.
+
+        `factor` multiplies RGB components (clamped to 255).
+        """
+        if factor <= 0:
+            return
+        r0, g0, b0 = color
+        sr = lambda v: min(255, int(v * factor))
+        for t in range(thickness):
+            cx = x + t
+            cy = y + t
+            cw = w - 2 * t
+            ch = h - 2 * t
+            if cw <= 0 or ch <= 0:
+                break
+            r, g, b = sr(r0), sr(g0), sr(b0)
+            for dx in range(cw):
+                self.set_pixel(cx + dx, cy, r, g, b)
+                self.set_pixel(cx + dx, cy + ch - 1, r, g, b)
+            for dy in range(ch):
+                self.set_pixel(cx, cy + dy, r, g, b)
+                self.set_pixel(cx + cw - 1, cy + dy, r, g, b)
 
     def draw_progress_bar(self, x, y, w, fraction, fg_color, bg_color):
         filled = int(w * fraction)

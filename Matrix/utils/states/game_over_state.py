@@ -21,11 +21,11 @@ class GameOverState(GameState):
 
         on = (int(self.timer * 3) % 2) == 0
         if on:
-            engine.draw_text_small("GAME", 2, 4, RED)
-            engine.draw_text_small("OVER", 2, 10, RED)
+            engine.draw_text_small("GAME", 0, 4, RED)
+            engine.draw_text_small("OVER", 1, 10, RED)
 
         score_text = str(self.round_num)
-        engine.draw_text_large(score_text, 4, 18, YELLOW)
+        engine.draw_text_large(score_text, 6, 20, YELLOW)
 
         if self.timer > 2.0:
             if engine.any_pressed():

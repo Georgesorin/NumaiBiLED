@@ -19,14 +19,21 @@ class SpawnRules:
     PLAY_H = 26
     PW = 2
     PH = 2
+    # Margin in pixels to avoid spawning on the outer border (2 tiles)
+    MARGIN_X = 2
+    MARGIN_Y = 2
 
     def __init__(self, settings: GameSettings, size):
         self.board_w = size
         self.play_h = self.PLAY_H
         self.cutoff_fraction = settings.heat_search_area
         self.heat_spread = settings.heat_spread
-        self._grid_w = self.board_w // self.PW
-        self._grid_h = self.play_h // self.PH
+        # Compute grid dimensions inside the margins so spawned 2x2 tiles
+        # never overlap the 2-tile border on any side.
+        usable_w = max(0, self.board_w - 2 * self.MARGIN_X)
+        usable_h = max(0, self.play_h - 2 * self.MARGIN_Y)
+        self._grid_w = usable_w // self.PW
+        self._grid_h = usable_h // self.PH
         self.heat = [[1.0] * self._grid_w for _ in range(self._grid_h)]
 
     def reset(self):
@@ -38,7 +45,7 @@ class SpawnRules:
         return x // self.PW, y // self.PH
 
     def _grid_to_pos(self, gx, gy):
-        return gx * self.PW, gy * self.PH
+        return gx * self.PW + self.MARGIN_X, gy * self.PH + self.MARGIN_Y
 
     def _distance(self, gx1, gy1, gx2, gy2):
         return ((gx1 - gx2) ** 2 + (gy1 - gy2) ** 2) ** 0.5
