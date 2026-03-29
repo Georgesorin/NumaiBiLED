@@ -5,7 +5,7 @@ import threading
 # Add the current directory to sys.path to allow imports from game_engine and utils
 sys.path.insert(0, os.path.dirname(__file__))
 
-from utils.data.network import load_config, run_discovery_flow, NetworkManager
+from utils.data.network import load_config, configure_from_discovery, NetworkManager
 from utils.master.master import GameMaster, game_thread_func
 from utils.scaling.game_settings import PatternMemorySettings
 from utils.states import SetupState, CountdownState, PlayState, GameOverState
@@ -27,11 +27,16 @@ def main():
     # Manual settings prompt (Phase 4)
     settings = prompt_settings()
 
-    # Initial discovery
-    discovered_ip = run_discovery_flow()
-    if discovered_ip:
-        cfg["device_ip"] = discovered_ip
-        print(f"Using discovered device at {discovered_ip}")
+    cfg, discovered = configure_from_discovery(cfg, cfg_path)
+    if discovered:
+        print(
+            f"Configured device at {cfg['device_ip']} "
+            f"(send UDP {cfg['send_port']}, receive {cfg['recv_port']})"
+        )
+    else:
+        print(
+            "Discovery did not find a device; using device_ip, send_port, and recv_port from config."
+        )
 
     # Instantiate GameMaster with the initial SetupState and transitions
     def make_start():

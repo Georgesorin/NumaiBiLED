@@ -14,6 +14,7 @@ class GameMaster:
 
     def __init__(self, initial_state_factory, settings, transitions):
         self.engine = GameEngine()
+        self.lock = threading.Lock()
         self.running = True
         self.button_states = self.engine.button_states
         self._initial_state_factory = initial_state_factory
