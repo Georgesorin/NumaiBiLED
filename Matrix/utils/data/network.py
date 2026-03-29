@@ -23,8 +23,8 @@ except ImportError:
 def load_config(cfg_file=None):
     defaults = {
         "device_ip": "255.255.255.255",
-        "send_port": 50067,
-        "recv_port": 50167,
+        "send_port": 4626,
+        "recv_port": 7800,
         "bind_ip": "0.0.0.0"
     }
     if cfg_file is None:
