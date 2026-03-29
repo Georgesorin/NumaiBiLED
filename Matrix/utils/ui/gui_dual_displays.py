@@ -111,6 +111,39 @@ def _enum_monitors() -> list[MonitorInfo]:
     return _enum_monitors_xrandr()
 
 
+def _maybe_add_inferred_secondary(
+    root: tk.Tk, monitors: list[MonitorInfo]
+) -> list[MonitorInfo]:
+    """
+    If the OS only returns one monitor but the virtual screen is wider/taller,
+    synthesize a second monitor rect (typical extended desktop).
+    """
+    if len(monitors) >= 2:
+        return monitors
+    if len(monitors) != 1:
+        return monitors
+    try:
+        root.update_idletasks()
+        vw = root.winfo_screenwidth()
+        vh = root.winfo_screenheight()
+    except tk.TclError:
+        return monitors
+    x, y, w, h, _ = monitors[0]
+    # Neighbour to the right (most common)
+    if vw > x + w + 80:
+        sx, sy = x + w, y
+        sw, sh = vw - sx, min(vh, h)
+        if sw >= 160:
+            return [monitors[0], (sx, sy, sw, sh, False)]
+    # Neighbour to the left
+    if x > 80:
+        sw = x
+        sh = min(vh, h)
+        if sw >= 160:
+            return [monitors[0], (0, y, sw, sh, False)]
+    return monitors
+
+
 def _pick_primary_secondary(
     monitors: list[MonitorInfo],
 ) -> tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple[int, int, int, int]]]:
@@ -125,8 +158,34 @@ def _pick_primary_secondary(
     others = [m for m in monitors if m != primary_t]
     if not others:
         return primary_rect, None
-    sx, sy, sw, sh, _ = others[0]
+    # Prefer the monitor horizontally farthest from primary (the "other" screen in a 2-panel setup)
+    pcx, pcy = px + pw // 2, py + ph // 2
+
+    def _dist2(m: MonitorInfo) -> float:
+        mx, my, mw, mh = m[0], m[1], m[2], m[3]
+        cx, cy = mx + mw // 2, my + mh // 2
+        return float((cx - pcx) ** 2 + (cy - pcy) ** 2)
+
+    best = max(others, key=_dist2)
+    sx, sy, sw, sh, _ = best
     return primary_rect, (sx, sy, sw, sh)
+
+
+def _win32_set_window_rect(widget: tk.Misc, x: int, y: int, w: int, h: int) -> None:
+    """Force outer window position/size on Windows (helps move Toplevel to 2nd monitor)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        hwnd = int(widget.winfo_id())
+        SWP_NOZORDER = 0x0004
+        SWP_SHOWWINDOW = 0x0040
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, None, int(x), int(y), int(w), int(h), SWP_NOZORDER | SWP_SHOWWINDOW
+        )
+    except Exception:
+        pass
 
 # Bidirectional UDP (game ↔ Tk): game binds GAME, sends state to GUI; GUI binds GUI, sends cmds to GAME.
 # Pair 4626 / 7800; GUI listen port uses 7800 + 1 (7801) so the base 7800 stays the documented “state” side.
@@ -276,25 +335,39 @@ class MatrixGameDisplays:
             return
         try:
             self.root.update_idletasks()
-            primary, secondary = _pick_primary_secondary(_enum_monitors())
+            mons = _maybe_add_inferred_secondary(self.root, _enum_monitors())
+            primary, secondary = _pick_primary_secondary(mons)
             if primary and secondary:
                 px, py, pw, ph = primary
                 sx, sy, sw, sh = secondary
+                # Control: move to primary, then fullscreen
+                self.root.attributes("-fullscreen", False)
                 self.root.geometry(f"{pw}x{ph}+{px}+{py}")
+                self.root.update_idletasks()
+                _win32_set_window_rect(self.root, px, py, pw, ph)
                 self.root.deiconify()
                 self.root.lift()
                 self.root.attributes("-fullscreen", True)
+
+                # Scoreboard: must be placed on the secondary rect *before* fullscreen or it stays on primary
+                self.score_window.attributes("-fullscreen", False)
+                self.score_window.withdraw()
                 self.score_window.geometry(f"{sw}x{sh}+{sx}+{sy}")
+                self.score_window.update_idletasks()
+                _win32_set_window_rect(self.score_window, sx, sy, sw, sh)
                 self.score_window.deiconify()
                 self.score_window.lift()
                 self.score_window.attributes("-fullscreen", True)
             elif primary:
                 px, py, pw, ph = primary
+                self.root.attributes("-fullscreen", False)
                 self.root.geometry(f"{pw}x{ph}+{px}+{py}")
+                _win32_set_window_rect(self.root, px, py, pw, ph)
                 self.root.attributes("-fullscreen", True)
                 half = max(pw // 2, 1)
                 self.score_window.attributes("-fullscreen", False)
                 self.score_window.geometry(f"{pw - half}x{ph}+{px + half}+{py}")
+                _win32_set_window_rect(self.score_window, px + half, py, pw - half, ph)
             else:
                 sw = self.root.winfo_screenwidth()
                 sh = self.root.winfo_screenheight()
