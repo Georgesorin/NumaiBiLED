@@ -3,21 +3,39 @@ import colorsys
 from .colors import BLACK, GREEN, RED, WHITE, BLUE, YELLOW
 from ..data.game_engine import NUM_WALLS
 
-def render_dispatcher_wall(engine, dispatcher_player, is_broken, t):
+def render_dispatcher_wall(engine, dispatcher_player, is_broken, t, target_btn=None):
     """
     Lights up the dispatcher wall. 
-    Shows the assigned color map.
+    Shows the assigned color map or a broken glitch effect.
     """
     if not dispatcher_player:
         return
 
-    # Show regular color map
-    for btn in dispatcher_player.buttons:
-        engine.set_button(dispatcher_player.wall, btn, *dispatcher_player.color_map.get(btn, BLACK))
-    
-    # Eye pulse YELLOW to indicate "control"
-    intensity = int(150 + 50 * math.sin(t * 2))
-    engine.set_eye(dispatcher_player.wall, intensity, intensity, 0)
+    if is_broken:
+        # Glitch effect: static and red eyes
+        for btn in dispatcher_player.buttons:
+            if btn == target_btn:
+                # Target button for reboot pulses WHITE
+                val = int(127 + 127 * math.sin(t * 10))
+                engine.set_button(dispatcher_player.wall, btn, val, val, val)
+            else:
+                # Static: dim red flickering
+                if (int(t * 15) + btn) % 3 == 0:
+                    engine.set_button(dispatcher_player.wall, btn, 50, 0, 0)
+                else:
+                    engine.set_button(dispatcher_player.wall, btn, 0, 0, 0)
+        
+        # Eye flashes RED
+        eye_val = int(127 + 127 * math.sin(t * 20))
+        engine.set_eye(dispatcher_player.wall, eye_val, 0, 0)
+    else:
+        # Show regular color map
+        for btn in dispatcher_player.buttons:
+            engine.set_button(dispatcher_player.wall, btn, *dispatcher_player.color_map.get(btn, BLACK))
+        
+        # Eye pulse YELLOW to indicate "control"
+        intensity = int(150 + 50 * math.sin(t * 2))
+        engine.set_eye(dispatcher_player.wall, intensity, intensity, 0)
 
 def render_active_wall(engine, wall_id, players, t, timer, sequence_length):
     """

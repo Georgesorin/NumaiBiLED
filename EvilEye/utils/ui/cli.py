@@ -1,4 +1,4 @@
-from ..scaling.game_settings import PatternMemorySettings, BossBattleSettings, DIFFICULTY
+from ..scaling.game_settings import PatternMemorySettings, BossBattleSettings, DispatcherSettings, DIFFICULTY
 from ..data.pattern_memory_data import PLAYER_CONFIGS
 
 def prompt_settings():
@@ -85,6 +85,49 @@ def prompt_boss_settings():
 
     print(f"\n  Players: {settings.player_count}")
     print(f"  Difficulty: {settings.difficulty_name}")
+    print()
+    return settings
+def prompt_dispatcher_settings():
+    print("\n=== DISPATCHER - Setup ===\n")
+
+    valid_counts = sorted(PLAYER_CONFIGS.keys())
+    while True:
+        try:
+            n_str = input(f"Number of players ({', '.join(map(str, valid_counts))}): ").strip()
+            if not n_str:
+                n = 4 # Default
+                break
+            n = int(n_str)
+            if n in valid_counts:
+                break
+            print(f"  Please enter one of: {', '.join(map(str, valid_counts))}")
+        except ValueError:
+            print("  Invalid input.")
+
+    diff_names = ["easy", "medium", "hard"]
+    print("\nDifficulty:")
+    for i, name in enumerate(diff_names, 1):
+        print(f"  {i}. {name}")
+
+    while True:
+        try:
+            choice = input(f"Choose difficulty (1-3): ").strip()
+            if not choice:
+                idx = 1 # Default (medium)
+                break
+            idx = int(choice) - 1
+            if 0 <= idx < 3:
+                break
+            print(f"  Please enter a number between 1 and 3.")
+        except ValueError:
+            print("  Invalid input.")
+
+    diff_name = diff_names[idx]
+    settings = DispatcherSettings(n, diff_name)
+
+    print(f"\n  Players: {settings.player_count}")
+    print(f"  Difficulty: {settings.difficulty_name}")
+    print(f"  Pattern length: {settings.pattern_length}")
     print()
     return settings
 

@@ -13,8 +13,8 @@ except ImportError:
 from .game_engine import FRAME_DATA_LENGTH, LEDS_PER_WALL, NUM_WALLS
 
 # --- Evil Eye constants ---
-UDP_SEND_PORT = 4626
-UDP_LISTEN_PORT = 7800
+UDP_SEND_PORT = 50267
+UDP_LISTEN_PORT = 50367
 ROUND_DURATION = 60.0  # 1 minute per round (for games that use timed rounds)
 
 EVIL_EYE_SEND_PORT = UDP_SEND_PORT

@@ -39,28 +39,55 @@ def main():
             "Discovery did not find a device; using device_ip, send_port, and recv_port from config."
         )
 
-    # Terminal Buffer: Give user time to move to the walls
-    print("\nSettings applied. Get ready to move to the walls!")
-    for i in range(3, 0, -1):
-        print(f"Starting in {i}...", end="\r")
-        time.sleep(1)
-    print("Go!             \n")
-
-    # Instantiate GameMaster with the initial SetupState and transitions
+    # Instantiate GameMaster and start networking BEFORE countdown
     def make_start():
         return SetupState(settings)
 
     gm = GameMaster(make_start, settings, transitions)
-    
-    # Start networking
     net = NetworkManager(gm, config=cfg)
     net.start_bg()
+
+    from utils.ui.colors import RED, GREEN
+
+    from utils.data.audio_manager import get_audio_manager
+    audio = get_audio_manager()
+    base_assets = os.path.join(os.path.dirname(__file__), "assets")
+    sfx_start = os.path.join(base_assets, "sfx", "start_pattern_timeout.wav")
+    sfx_end = os.path.join(base_assets, "sfx", "end_pattern_timeout.wav")
+    music_level = os.path.join(base_assets, "music", "pattern_music.mp3")
+
+    # Terminal Buffer: Give user time to move to the walls
+    print("\nSettings applied. Get ready to move to the walls!")
+    for i in range(4, 0, -1):
+        if i == 4:
+            gm.engine.clear()
+            print(f"Starting in {i}...", end="\r")
+            time.sleep(1)
+        else:
+            # LED Animation: flash red, red, green
+            if i > 1:
+                color = RED
+                audio.play_sfx(sfx_start)
+            else:
+                color = GREEN
+                audio.play_sfx(sfx_end)
+
+            gm.engine.set_all(*color)
+            print(f"Starting in {i}...", end="\r")
+            time.sleep(0.5)
+            gm.engine.clear()
+            time.sleep(0.5)
+    
+    print("Go!             \n")
 
     # Start game thread
     gt = threading.Thread(
         target=game_thread_func, args=(gm,), daemon=True
     )
     gt.start()
+    
+    # Start background music
+    audio.play_music(music_level)
 
     print("Pattern Memory Game (Interactive)")
     print("Commands: 'restart', 'setup', 'quit'")
@@ -72,6 +99,7 @@ def main():
         gm.running = False
 
     net.running = False
+    audio.stop_music()
     print("Exiting...")
 
 if __name__ == "__main__":

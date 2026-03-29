@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from utils.data.network import load_config, configure_from_discovery, NetworkManager
 from utils.master.master import GameMaster, game_thread_func
-from utils.scaling.game_settings import PatternMemorySettings
+from utils.scaling.game_settings import DispatcherSettings
 from utils.states import DispatcherSetupState, DispatcherCountdownState, DispatcherPlayState, GameOverState
-from utils.ui.cli import prompt_settings, prompt_render
+from utils.ui.cli import prompt_dispatcher_settings, prompt_render
 
 # Transitions specifically for Dispatcher Game
 transitions = {
@@ -26,7 +26,7 @@ def main():
     cfg = load_config(cfg_path)
 
     # Manual settings prompt
-    settings = prompt_settings()
+    settings = prompt_dispatcher_settings()
 
     # Discovery
     cfg, discovered = configure_from_discovery(cfg, cfg_path)
@@ -57,17 +57,24 @@ def main():
         target=game_thread_func, args=(gm,), daemon=True
     )
     gt.start()
+    
+    from utils.data.audio_manager import get_audio_manager
+    audio = get_audio_manager()
+    music_path = os.path.join(os.path.dirname(__file__), "assets", "music", "dispatch_music.wav")
+    audio.play_music(music_path)
 
     print("Dispatcher Game (Evil Eye - Game 2)")
     print("Commands: 'restart', 'setup', 'quit'")
 
     try:
         while gm.running:
-            prompt_render(gm, setup_state_class=DispatcherSetupState)
+            prompt_render(gm, setup_state_class=DispatcherSetupState, prompt_func=prompt_dispatcher_settings)
     except KeyboardInterrupt:
         gm.running = False
 
     net.running = False
+    from utils.data.audio_manager import get_audio_manager
+    get_audio_manager().stop_music()
     print("Exiting...")
 
 if __name__ == "__main__":

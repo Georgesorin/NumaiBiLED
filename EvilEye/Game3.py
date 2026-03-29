@@ -72,6 +72,8 @@ def main():
         gm.running = False
 
     net.running = False
+    from utils.data.audio_manager import get_audio_manager
+    get_audio_manager().stop_music()
     print("Exiting...")
 
 if __name__ == "__main__":

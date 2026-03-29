@@ -1,7 +1,9 @@
+import os
 import random
 import math
 from ._abs_state import GameEngine, GameState
 from ..ui.colors import RED, BLUE, GREEN, YELLOW, WHITE
+from ..data.audio_manager import get_audio_manager
 
 class BossBattleStage1State(GameState):
     """Stage 1: Synchronized Pulse.
@@ -25,6 +27,8 @@ class BossBattleStage1State(GameState):
 
     def enter(self, engine: GameEngine):
         engine.clear()
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "music", "boss_battle_start.wav")
+        get_audio_manager().play_music(path)
 
     def update(self, engine: GameEngine, dt: float):
         self._t += dt

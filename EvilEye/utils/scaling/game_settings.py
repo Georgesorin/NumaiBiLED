@@ -55,3 +55,26 @@ class BossBattleSettings:
         for c in colors:
             pattern[c] = random.randint(2, 5)
         return pattern
+
+class DispatcherSettings:
+    def __init__(self, player_count, difficulty):
+        self.player_count = player_count
+        self.difficulty_name = difficulty
+        
+        # Balancing based on user feedback (Phase 7)
+        if difficulty == "easy":
+            self.wall_timeout = 12.0
+            self.bonus_time = 8.0
+            self.pattern_length = 3
+        elif difficulty == "medium":
+            self.wall_timeout = 9.0
+            self.bonus_time = 6.0
+            self.pattern_length = 5
+        else: # hard
+            self.wall_timeout = 6.0
+            self.bonus_time = 4.0
+            self.pattern_length = 8
+            
+        cfg = PLAYER_CONFIGS.get(player_count, {"walls": 4, "per_wall": 2})
+        self.walls_used = cfg["walls"]
+        self.per_wall = cfg["per_wall"]

@@ -1,7 +1,9 @@
+import os
 import math
 import random
 from ._abs_state import GameEngine, GameState
 from ..ui.colors import RED, BLUE, GREEN, YELLOW, WHITE, PURPLE, CYAN, ORANGE
+from ..data.audio_manager import get_audio_manager
 
 class BossBattleStage2State(GameState):
     """Stage 2: Orbital Strike (Hot Potato).
@@ -30,6 +32,8 @@ class BossBattleStage2State(GameState):
 
     def enter(self, engine: GameEngine):
         engine.clear()
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "music", "boss_battle_middle.wav")
+        get_audio_manager().play_music(path)
 
     def update(self, engine: GameEngine, dt: float):
         self._t += dt

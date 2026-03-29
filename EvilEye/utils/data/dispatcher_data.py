@@ -16,9 +16,27 @@ class DispatcherGameData:
         self.score = 0
         self.current_sequence = []
         
-        # Determine sequence length based on difficulty
+        # Calibration from settings (Phase 7)
         self.sequence_length = settings.pattern_length
-        self.wall_timeout = 5.0 # Seconds per wall as requested
+        self.wall_timeout = getattr(settings, "wall_timeout", 5.0)
+        self.bonus_time = getattr(settings, "bonus_time", 5.0)
+        
+        # Crash Mechanic
+        self.is_crashed = False
+        self.crash_progress = 0
+        self.crash_target_button = None
+        self.next_crash_t = 20.0 # First crash around 20s
+
+    def trigger_crash(self):
+        self.is_crashed = True
+        self.crash_progress = 0
+        self.pick_random_minigame_button()
+
+    def pick_random_minigame_button(self):
+        if self.dispatcher_player:
+            self.crash_target_button = random.choice(self.dispatcher_player.buttons)
+        else:
+            self.crash_target_button = 1
 
     def generate_sequence(self):
         palette = [c for c in ALL_COLORS if c != BLACK]
