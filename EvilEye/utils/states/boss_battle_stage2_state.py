@@ -1,27 +1,32 @@
+import math
+import random
 from ._abs_state import GameEngine, GameState
 from ..ui.colors import RED, BLUE, GREEN, YELLOW, WHITE, PURPLE, CYAN, ORANGE
 
 class BossBattleStage2State(GameState):
-    """Stage 2: Color Resonance.
-    Each wall is assigned a sub-color. All must hit their sub-color simultaneously.
+    """Stage 2: Orbital Strike (Hot Potato).
+    Pass the energy between walls in sequence. Success after 3 full laps.
     """
-    RESONANCE_MAP = [
-        (PURPLE, [RED, RED, BLUE, BLUE]),
-        (CYAN,   [GREEN, GREEN, BLUE, BLUE]),
-        (ORANGE, [RED, RED, YELLOW, YELLOW]),
-        (WHITE,  [RED, GREEN, BLUE, YELLOW]),
-    ]
+    CHARGE_COLOR = YELLOW
+    FAIL_COLOR = RED
 
     def __init__(self, settings, players):
         self.settings = settings
         self.players = players
         self._t = 0.0
-        self._next_color_t = 0.0
-        self._resonance_idx = 0
-        self._current_resonance = self.RESONANCE_MAP[0] # (eye_color, wall_colors)
         
-        self._completed_pulses = 0
-        self._wall_hits = {} # wall: timestamp
+        # Sort players by wall number to ensure a consistent circular sequence
+        self.sorted_players = sorted(players, key=lambda p: p.wall)
+        self.num_players = len(self.sorted_players)
+        
+        self._active_idx = 0
+        self._success_count = 0
+        self._target_success = self.num_players * 3 # 3 laps
+        
+        self._base_time = 3.0 # Starts generous (3s)
+        self._timer = self._base_time
+        self._state = "active" # "active", "fail_pause"
+        self._pause_t = 0.0
 
     def enter(self, engine: GameEngine):
         engine.clear()
@@ -29,52 +34,67 @@ class BossBattleStage2State(GameState):
     def update(self, engine: GameEngine, dt: float):
         self._t += dt
         
-        # Cycle Resonance Mode
-        if self._t >= self._next_color_t:
-            self._next_color_t = self._t + self.settings.cycle_speed
-            self._resonance_idx = (self._resonance_idx + 1) % len(self.RESONANCE_MAP)
-            self._current_resonance = self.RESONANCE_MAP[self._resonance_idx]
+        if self._state == "fail_pause":
+            self._pause_t -= dt
+            if self._pause_t <= 0:
+                self._state = "active"
+                # Reset to start of current lap
+                self._success_count = (self._success_count // self.num_players) * self.num_players
+                self._active_idx = 0
+                self._timer = self._base_time
+            
+            # Show red on all eyes during fail
+            for p in self.players:
+                engine.set_eye(p.wall, *self.FAIL_COLOR)
+            return
 
-        eye_color, wall_colors = self._current_resonance
+        # Decrease timer
+        self._timer -= dt
+        if self._timer <= 0:
+            # FAIL - reset current lap
+            self._state = "fail_pause"
+            self._pause_t = 1.5
+            return
+
+        active_p = self.sorted_players[self._active_idx]
+
+        # Draw
+        engine.clear_buttons()
+        for p in self.players:
+            if p.wall == active_p.wall:
+                # Active wall: Eye flashes, buttons pulse
+                flash = int(self._t * 10) % 2 == 0
+                engine.set_eye(p.wall, *(self.CHARGE_COLOR if flash else WHITE))
+                
+                btn_pulse = (math.sin(self._t * 10.0) + 1.2) / 2.2
+                pulse_color = (int(self.CHARGE_COLOR[0] * btn_pulse),
+                               int(self.CHARGE_COLOR[1] * btn_pulse),
+                               int(self.CHARGE_COLOR[2] * btn_pulse))
+                for b in range(1, 11):
+                    engine.set_button(p.wall, b, *pulse_color)
+            else:
+                # Idle walls
+                engine.set_eye(p.wall, 40, 40, 40) # Dim white
 
         # Input
         pressed = engine.get_pressed()
         for (wall, led) in pressed:
-            # Mark hit for this wall
-            self._wall_hits[wall] = self._t
+            if wall == active_p.wall:
+                # SUCCESS PASS!
+                self._success_count += 1
+                self._active_idx = (self._active_idx + 1) % self.num_players
+                
+                # Speed up: reduce time for next pass (min 0.8s)
+                progress = self._success_count / self._target_success
+                self._timer = max(0.8, self._base_time * (1.0 - progress * 0.6))
+                
+                # Visual pop on pass
+                engine.set_eye(wall, *WHITE)
+                break
 
-        # Draw
-        engine.clear_buttons()
-        active_walls = set(p.wall for p in self.players)
-        
-        # Check if all walls are currently within their sync window
-        all_synced = all(w in self._wall_hits and (self._t - self._wall_hits[w]) < self.settings.sync_window for w in active_walls)
-
-        for i, p in enumerate(self.players):
-            sub_color = wall_colors[i % len(wall_colors)]
-            
-            # Buttons always show the color you need to press
-            for b in p.buttons:
-                engine.set_button(p.wall, b, *sub_color)
-            
-            # Eye behavior:
-            if all_synced:
-                # SUCCESS RESONANCE: flash the combined color
-                engine.set_eye(p.wall, *eye_color)
-            elif p.wall in self._wall_hits and (self._t - self._wall_hits[p.wall]) < self.settings.sync_window:
-                # INDIVIDUAL HIT: eye shows the sub-color
-                engine.set_eye(p.wall, *sub_color)
-            else:
-                # NEUTRAL: eye is white or dim
-                engine.set_eye(p.wall, *WHITE)
-
-        # Handle State Transition on Success
-        if all_synced:
-            self._completed_pulses += 1
-            self._wall_hits.clear() # Clear to avoid double-counting the same pulse
-            
-            if self._completed_pulses >= self.settings.sync_count:
-                return ("stage3", {"players": self.players, "hp": 100})
+        # Check Transition
+        if self._success_count >= self._target_success:
+            return ("stage3", {"players": self.players, "hp": 100})
 
     def exit(self, engine: GameEngine):
         engine.clear()

@@ -1,11 +1,12 @@
 import sys
 import os
 import threading
+import time
 
 # Add the current directory to sys.path to allow imports from game_engine and utils
 sys.path.insert(0, os.path.dirname(__file__))
 
-from utils.data.network import load_config, run_discovery_flow, NetworkManager
+from utils.data.network import load_config, configure_from_discovery, NetworkManager
 from utils.master.master import GameMaster, game_thread_func
 from utils.states import (
     BossBattleSetupState, BossBattleCountdownState, BossBattleStage1State,
@@ -31,11 +32,19 @@ def main():
     # Manual settings prompt
     settings = prompt_boss_settings()
 
-    # Initial discovery
-    discovered_ip = run_discovery_flow()
-    if discovered_ip:
-        cfg["device_ip"] = discovered_ip
-        print(f"Using discovered device at {discovered_ip}")
+    # Discovery
+    cfg, discovered = configure_from_discovery(cfg, cfg_path)
+    if discovered:
+        print(f"Using discovered device at {cfg['device_ip']}")
+    else:
+        print("Discovery did not find a device; using config defaults.")
+
+    # Terminal Buffer: Give user time to move to the walls
+    print("\nSettings applied. Get ready to move to the walls!")
+    for i in range(3, 0, -1):
+        print(f"Starting in {i}...", end="\r")
+        time.sleep(1)
+    print("Go!             \n")
 
     # Instantiate GameMaster with the initial SetupState and transitions
     def make_start():

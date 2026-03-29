@@ -1,6 +1,7 @@
 import sys
 import os
 import threading
+import time
 
 # Add the current directory to sys.path to allow imports from game_engine and utils
 sys.path.insert(0, os.path.dirname(__file__))
@@ -37,6 +38,13 @@ def main():
         print(
             "Discovery did not find a device; using device_ip, send_port, and recv_port from config."
         )
+
+    # Terminal Buffer: Give user time to move to the walls
+    print("\nSettings applied. Get ready to move to the walls!")
+    for i in range(3, 0, -1):
+        print(f"Starting in {i}...", end="\r")
+        time.sleep(1)
+    print("Go!             \n")
 
     # Instantiate GameMaster with the initial SetupState and transitions
     def make_start():
