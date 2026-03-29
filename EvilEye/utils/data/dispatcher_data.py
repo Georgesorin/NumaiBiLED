@@ -46,7 +46,7 @@ class DispatcherGameData:
         for p in self.players:
             p.reset_progress()
 
-        # Assign colors to dispatcher buttons (1 to sequence_length)
+        # Assign colors to dispatcher buttons in sequence order (so they can be read easily)
         if self.dispatcher_player:
             mapping = {btn: BLACK for btn in self.dispatcher_player.buttons}
             for i, color in enumerate(self.current_sequence):

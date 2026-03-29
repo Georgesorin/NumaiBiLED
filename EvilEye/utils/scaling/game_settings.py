@@ -61,18 +61,18 @@ class DispatcherSettings:
         self.player_count = player_count
         self.difficulty_name = difficulty
         
-        # Balancing based on user feedback (Phase 7)
+        # Balancing based on user feedback (Phase 7 & 10)
         if difficulty == "easy":
-            self.wall_timeout = 12.0
-            self.bonus_time = 8.0
+            self.wall_timeout = 20.0 # Increased from 12.0
+            self.bonus_time = 10.0
             self.pattern_length = 3
         elif difficulty == "medium":
-            self.wall_timeout = 9.0
-            self.bonus_time = 6.0
+            self.wall_timeout = 15.0 # Increased from 9.0
+            self.bonus_time = 8.0
             self.pattern_length = 5
         else: # hard
-            self.wall_timeout = 6.0
-            self.bonus_time = 4.0
+            self.wall_timeout = 10.0 # Increased from 6.0
+            self.bonus_time = 5.0
             self.pattern_length = 8
             
         cfg = PLAYER_CONFIGS.get(player_count, {"walls": 4, "per_wall": 2})

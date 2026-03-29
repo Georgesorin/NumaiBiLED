@@ -1,3 +1,4 @@
+import random
 from .game_engine import NUM_WALLS, LEDS_PER_WALL
 from ..ui.colors import (
     BLACK, WHITE, RED, YELLOW, GREEN, BLUE, CYAN, MAGENTA, ORANGE, PURPLE,
@@ -80,8 +81,15 @@ def assign_colors(players, pattern):
     for p in players:
         usable = min(len(pattern), len(p.buttons))
         mapping = {}
-        for btn, color in zip(_centered_buttons(p.buttons, usable), pattern):
+        
+        # Get the subset of buttons to use and SHUFFLE them (Phase 9)
+        # so target colors aren't placed in predictable linear order
+        target_buttons = _centered_buttons(p.buttons, usable)
+        random.shuffle(target_buttons)
+        
+        for btn, color in zip(target_buttons, pattern):
             mapping[btn] = color
+            
         for btn in p.buttons:
             if btn not in mapping:
                 mapping[btn] = BLACK

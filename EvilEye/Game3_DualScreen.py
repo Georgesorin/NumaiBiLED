@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 
 _sys_root = os.path.dirname(os.path.abspath(__file__))
 if _sys_root not in sys.path:
@@ -26,6 +27,7 @@ from utils.states import (
     BossBattleStage3State,
     BossBattleGameOverState,
 )
+from utils.ui.colors import RED, GREEN
 from utils.ui.gui_dual_displays import (
     DualRuntimeCtx,
     EVILEYE_UDP_GAME_BIND,
@@ -120,6 +122,39 @@ def _start_boss_battle(ctx: DualRuntimeCtx, players: int, difficulty: int) -> No
     cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eye_ctrl_config.json")
     cfg = load_config(cfg_path)
     cfg, _ = configure_from_discovery(cfg, cfg_path)
+    
+    from utils.data.audio_manager import get_audio_manager
+    audio = get_audio_manager()
+    base_assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    sfx_start = os.path.join(base_assets, "sfx", "start_pattern_timeout.wav")
+    sfx_end = os.path.join(base_assets, "sfx", "end_pattern_timeout.wav")
+    
+    # Pre-cache sounds to avoid loading latency (Phase 10 Sync Fix)
+    audio.load_sfx(sfx_start)
+    audio.load_sfx(sfx_end)
+
+    # Countdown (Red-Red-Green)
+    for i in range(4, 0, -1):
+        if i == 4:
+            ctx.game.engine.clear()
+            time.sleep(1)
+        else:
+            if i > 1:
+                color = RED
+                sfx = sfx_start
+            else:
+                color = GREEN
+                sfx = sfx_end
+
+            # Set LEDs FIRST, then play sound (Phase 10 Fine-tune Sync)
+            # 60ms delay compensates for 20ms poll rate + 2 packet delays (8ms each) + network
+            ctx.game.engine.set_all(*color)
+            audio.play_sfx(sfx, delay_ms=60)
+
+            time.sleep(0.5)
+            ctx.game.engine.clear()
+            time.sleep(0.5)
+
     ctx.net = NetworkManager(ctx.game, config=cfg)
     ctx.net.start_bg()
     threading.Thread(target=game_thread_func, args=(ctx.game,), daemon=True).start()
@@ -174,6 +209,8 @@ def main():
             app.score_window.destroy()
         except Exception:
             pass
+        from utils.data.audio_manager import get_audio_manager
+        get_audio_manager().stop_music()
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)

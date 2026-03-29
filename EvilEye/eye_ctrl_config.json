@@ -1,5 +1,5 @@
 {
-  "device_ip": "192.168.1.108",
+  "device_ip": "10.200.1.47",
   "send_port": 50267,
   "recv_port": 50367,
   "bind_ip": "0.0.0.0",

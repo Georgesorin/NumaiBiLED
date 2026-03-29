@@ -35,11 +35,42 @@ def main():
     else:
         print("Discovery did not find a device; using config defaults.")
 
+    from utils.ui.colors import RED, GREEN
+    from utils.data.audio_manager import get_audio_manager
+    audio = get_audio_manager()
+    base_assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    sfx_start = os.path.join(base_assets, "sfx", "start_pattern_timeout.wav")
+    sfx_end = os.path.join(base_assets, "sfx", "end_pattern_timeout.wav")
+    
+    # Pre-cache sounds (Phase 10 Sync Fix)
+    audio.load_sfx(sfx_start)
+    audio.load_sfx(sfx_end)
+
     # Terminal Buffer: Give user time to move to the walls
     print("\nSettings applied. Get ready to move to the walls!")
-    for i in range(3, 0, -1):
-        print(f"Starting in {i}...", end="\r")
-        time.sleep(1)
+    for i in range(4, 0, -1):
+        if i == 4:
+            gm.engine.clear()
+            print(f"Starting in {i}...", end="\r")
+            time.sleep(1)
+        else:
+            # LED Animation: flash red, red, green
+            if i > 1:
+                color = RED
+                sfx = sfx_start
+            else:
+                color = GREEN
+                sfx = sfx_end
+
+            # Set LEDs FIRST, then play sound (Phase 10 Fine-tune Sync)
+            # 60ms delay compensates for 20ms poll rate + 2 packet delays (8ms each) + network
+            gm.engine.set_all(*color)
+            audio.play_sfx(sfx, delay_ms=60)
+            
+            print(f"Starting in {i}...", end="\r")
+            time.sleep(0.5)
+            gm.engine.clear()
+            time.sleep(0.5)
     print("Go!             \n")
 
     # Instantiate GameMaster with the initial SetupState and transitions

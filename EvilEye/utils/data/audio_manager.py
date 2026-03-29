@@ -78,7 +78,7 @@ class AudioManager:
             except Exception:
                 pass
 
-    def play_sfx(self, path):
+    def load_sfx(self, path):
         if not self._pygame:
             return
         try:
@@ -86,10 +86,31 @@ class AudioManager:
                 return
             if path not in self._sfx_cache:
                 self._sfx_cache[path] = self._pygame.mixer.Sound(path)
-            self._sfx_cache[path].set_volume(self._volume)
-            self._sfx_cache[path].play()
         except Exception:
             pass
+
+    def play_sfx(self, path, delay_ms=0):
+        if not self._pygame:
+            return
+        
+        def _execute_play():
+            try:
+                if not self.init_mixer():
+                    return
+                if path not in self._sfx_cache:
+                    self.load_sfx(path)
+                if path in self._sfx_cache:
+                    self._sfx_cache[path].set_volume(self._volume)
+                    self._sfx_cache[path].play()
+            except Exception:
+                pass
+
+        if delay_ms > 0:
+            t = threading.Timer(delay_ms / 1000.0, _execute_play)
+            t.daemon = True
+            t.start()
+        else:
+            _execute_play()
 
 
 _audio_manager = AudioManager()

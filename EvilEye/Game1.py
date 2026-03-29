@@ -56,6 +56,10 @@ def main():
     sfx_end = os.path.join(base_assets, "sfx", "end_pattern_timeout.wav")
     music_level = os.path.join(base_assets, "music", "pattern_music.mp3")
 
+    # Pre-cache sounds (Phase 10 Sync Fix)
+    audio.load_sfx(sfx_start)
+    audio.load_sfx(sfx_end)
+    
     # Terminal Buffer: Give user time to move to the walls
     print("\nSettings applied. Get ready to move to the walls!")
     for i in range(4, 0, -1):
@@ -67,12 +71,16 @@ def main():
             # LED Animation: flash red, red, green
             if i > 1:
                 color = RED
-                audio.play_sfx(sfx_start)
+                sfx = sfx_start
             else:
                 color = GREEN
-                audio.play_sfx(sfx_end)
+                sfx = sfx_end
 
+            # Set LEDs FIRST, then play sound (Phase 10 Fine-tune Sync)
+            # 60ms delay compensates for 20ms poll rate + 2 packet delays (8ms each) + network
             gm.engine.set_all(*color)
+            audio.play_sfx(sfx, delay_ms=60)
+            
             print(f"Starting in {i}...", end="\r")
             time.sleep(0.5)
             gm.engine.clear()
