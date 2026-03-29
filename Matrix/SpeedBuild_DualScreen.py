@@ -1,6 +1,6 @@
 """
-Speed Build (Memory Matrix) — panou control + scoreboard, UDP + Tkinter.
-Rulează din folderul Matrix: python3 SpeedBuild_DualScreen.py
+Speed Build (Memory Matrix) — control panel + scoreboard over UDP/Tkinter.
+Run from the Matrix folder: python3 SpeedBuild_DualScreen.py
 """
 
 from __future__ import annotations
@@ -75,21 +75,21 @@ def _state_speedbuild(game):
             "state": "WAITING",
             "turn": None,
             "scores": [],
-            "detail": "Selectează jucători și dificultate, apoi START.",
+            "detail": "Choose players and difficulty, then Run game.",
             "scores_label": "—",
         }
     st = game.engine.state
     name = type(st).__name__ if st else "UNKNOWN"
     settings = game.settings
     detail = [
-        f"Jucători: {settings.player_count}",
-        f"Dificultate: {settings.difficulty}",
+        f"Players: {settings.player_count}",
+        f"Difficulty: {settings.difficulty}",
     ]
 
     if hasattr(settings, "status_text") and settings.status_text:
-        detail.append(f"Mod: {settings.status_text}")
+        detail.append(f"Mode: {settings.status_text}")
     if hasattr(settings, "time_left") and not getattr(settings, "hide_timer", True):
-        detail.append(f"Timp rămas: {settings.time_left:.1f}s")
+        detail.append(f"Time left: {settings.time_left:.1f}s")
 
     scores = []
     winner_text = ""
@@ -101,11 +101,11 @@ def _state_speedbuild(game):
         scores = [p.score for p in st.players]
         show_winner = True
         if st.is_tie:
-            winner_text = "Egalitate!"
+            winner_text = "Tie game!"
         elif st.winner is not None:
-            winner_text = f"Câștigător: jucător {st.winner.id}"
+            winner_text = f"Winner: player {st.winner.id}"
         else:
-            winner_text = "Rezultate"
+            winner_text = "Results"
 
     return {
         "state": name,
@@ -115,7 +115,7 @@ def _state_speedbuild(game):
         "winner_text": winner_text,
         "show_winner": show_winner,
         "detail": "\n".join(detail),
-        "scores_label": "Celule corecte (max 36) per jucător" if scores else "—",
+        "scores_label": "Correct cells (max 36) per player" if scores else "—",
     }
 
 
@@ -125,7 +125,7 @@ def _start_speedbuild(ctx: DualRuntimeCtx, players: int, difficulty: int) -> Non
     if ctx.game is not None and not ctx.game.running:
         cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
 
-    pl = min(6, max(1, int(players)))
+    pl = min(6, max(2, int(players)))
     diff = min(3, max(1, int(difficulty)))
     settings = SpeedBuildSettings(pl, diff)
     settings.hide_timer = True
@@ -169,9 +169,9 @@ def main():
         ctx,
         gui_bind_port=MATRIX_UDP_GUI_BIND,
         game_bind_port=MATRIX_UDP_GAME_BIND,
-        control_title="Speed Build — panou control",
-        scoreboard_title="Speed Build — scoreboard",
-        min_players=1,
+        control_title="Speed Build — Control",
+        scoreboard_title="Speed Build — Scoreboard",
+        min_players=2,
         max_players=6,
     )
     threading.Thread(

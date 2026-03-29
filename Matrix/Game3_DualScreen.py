@@ -1,6 +1,6 @@
 """
-Snake (Game 3) — panou control + scoreboard, UDP + Tkinter.
-Rulează din folderul Matrix: python3 Game3_DualScreen.py
+Snake (Game 3) — control panel + scoreboard over UDP/Tkinter.
+Run from the Matrix folder: python3 Game3_DualScreen.py
 """
 
 from __future__ import annotations
@@ -46,38 +46,38 @@ def _state_snake(game):
             "state": "WAITING",
             "turn": None,
             "scores": [],
-            "detail": "Selectează jucători și dificultate, apoi START.",
+            "detail": "Choose players and difficulty, then Run game.",
             "scores_label": "—",
         }
     st = game.engine.state
     name = type(st).__name__ if st else "UNKNOWN"
-    detail = [f"Jucători: {game.settings.player_count}"]
+    detail = [f"Players: {game.settings.player_count}"]
 
     if name == "SnakePlayState":
         detail.append(f"HP: {game.settings.hp}/{game.settings.max_hp}")
-        detail.append(f"Fructe distruse: {st.players_destroyed} · Mâncate de șarpe: {st.snake_ate}")
+        detail.append(f"Fruits stomped: {st.players_destroyed} · Eaten by snake: {st.snake_ate}")
     elif name == "SnakeEndState":
-        detail.append(f"Timp: {int(st.play_time)}s")
-        detail.append(f"Fructe distruse: {st.players_destroyed} · Șarpe a mâncat: {st.snake_ate}")
-        detail.append(f"Motiv: {st.reason}")
+        detail.append(f"Time: {int(st.play_time)}s")
+        detail.append(f"Fruits stomped: {st.players_destroyed} · Snake ate: {st.snake_ate}")
+        detail.append(f"Reason: {st.reason}")
 
     scores_label = "—"
     if name == "SnakePlayState":
         scores_label = (
-            f"Fructe distruse: {st.players_destroyed}\n"
-            f"Mâncate de șarpe: {st.snake_ate}"
+            f"Fruits stomped: {st.players_destroyed}\n"
+            f"Eaten by snake: {st.snake_ate}"
         )
     elif name == "SnakeEndState":
         scores_label = (
-            f"Final — distruse: {st.players_destroyed}, "
-            f"șarpe: {st.snake_ate}, timp {int(st.play_time)}s"
+            f"Final — stomped: {st.players_destroyed}, "
+            f"snake: {st.snake_ate}, time {int(st.play_time)}s"
         )
 
     winner_text = ""
     show_winner = False
     if name == "SnakeEndState":
         show_winner = True
-        winner_text = "Victorie jucători!" if st.win else "Șarpele a câștigat!"
+        winner_text = "Players win!" if st.win else "Snake wins!"
 
     return {
         "state": name,
@@ -136,8 +136,8 @@ def main():
         ctx,
         gui_bind_port=MATRIX_UDP_GUI_BIND,
         game_bind_port=MATRIX_UDP_GAME_BIND,
-        control_title="Snake — panou control",
-        scoreboard_title="Snake — scoreboard",
+        control_title="Snake — Control",
+        scoreboard_title="Snake — Scoreboard",
         min_players=2,
         max_players=6,
     )

@@ -47,8 +47,9 @@ def _prompt_settings():
     while True:
         try:
             n = int(input("Number of players (2-6): ").strip())
-            if 1 <= n <= 6: break
-            print("  Please enter a number between 1 and 6.")
+            if 2 <= n <= 6:
+                break
+            print("  Please enter a number between 2 and 6.")
         except ValueError: print("  Invalid input.")
     while True:
         try:

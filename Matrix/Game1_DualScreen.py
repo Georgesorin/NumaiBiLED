@@ -1,6 +1,6 @@
 """
-Keep Alive (Game 1) — panou control (touch) + scoreboard (non-touch), UDP + Tkinter.
-Rulează din folderul Matrix: python Game1_DualScreen.py
+Keep Alive (Game 1) — touch control panel + scoreboard via UDP/Tkinter.
+Run from the Matrix folder: python3 Game1_DualScreen.py
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _state_game1(game):
             "turn": None,
             "scores": [],
             "winner": None,
-            "detail": "Selectează jucători și dificultate, apoi START.",
+            "detail": "Choose players and difficulty, then Run game.",
             "scores_label": "—",
         }
     st = game.engine.state
@@ -64,20 +64,20 @@ def _state_game1(game):
     detail_parts = []
     round_num = getattr(st, "round_num", None)
     if round_num is not None:
-        detail_parts.append(f"Rundă: {round_num}")
+        detail_parts.append(f"Round: {round_num}")
     if name == "PlayState":
         dur = getattr(st, "round_duration", 0) or 1
         t = getattr(st, "round_timer_curr", 0)
-        detail_parts.append(f"Timp rundă: {max(0, dur - t):.1f}s / {dur:.1f}s")
+        detail_parts.append(f"Round time: {max(0, dur - t):.1f}s / {dur:.1f}s")
     elif name == "GameOverState":
-        detail_parts.append(f"Motiv: {getattr(st, 'reason', '')}")
-        detail_parts.append(f"Runde rezistate: {getattr(st, 'round_num', 0)}")
+        detail_parts.append(f"Reason: {getattr(st, 'reason', '')}")
+        detail_parts.append(f"Rounds survived: {getattr(st, 'round_num', 0)}")
 
     scores_label = "—"
     if name == "PlayState" and round_num is not None:
-        scores_label = f"Runda curentă: {round_num}"
+        scores_label = f"Current round: {round_num}"
     elif name == "GameOverState":
-        scores_label = f"Ultima rundă: {getattr(st, 'round_num', 0)}"
+        scores_label = f"Last round: {getattr(st, 'round_num', 0)}"
 
     return {
         "state": name,
@@ -86,7 +86,7 @@ def _state_game1(game):
         "winner": None,
         "winner_text": "",
         "show_winner": False,
-        "detail": "\n".join(detail_parts) if detail_parts else f"Jucători: {game.settings.player_count}",
+        "detail": "\n".join(detail_parts) if detail_parts else f"Players: {game.settings.player_count}",
         "scores_label": scores_label,
     }
 
@@ -142,8 +142,8 @@ def main():
         ctx,
         gui_bind_port=MATRIX_UDP_GUI_BIND,
         game_bind_port=MATRIX_UDP_GAME_BIND,
-        control_title="Keep Alive — panou control",
-        scoreboard_title="Keep Alive — scoreboard",
+        control_title="Keep Alive — Control",
+        scoreboard_title="Keep Alive — Scoreboard",
         min_players=2,
         max_players=6,
     )
