@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from typing import Any, Callable, Optional, Tuple
 
 LOCAL_IP = "127.0.0.1"
@@ -251,10 +252,15 @@ class MatrixGameDisplays:
         self.gui_running = True
         self.min_players = min_players
         self.max_players = max_players
+        self._ui_scale = 1.0
+        self._fonts: dict[str, tkfont.Font] = {}
 
-        self._control_parent = tk.Frame(self.root, bg=self._panel_bg)
-        self._control_parent.pack(fill=tk.BOTH, expand=True)
+        self._control_outer = tk.Frame(self.root, bg=self._panel_bg)
+        self._control_outer.pack(fill=tk.BOTH, expand=True)
+        self._control_parent = tk.Frame(self._control_outer, bg=self._panel_bg)
+        self._control_parent.place(relx=0.5, rely=0.5, anchor="center")
 
+        self._make_fonts(1.0, 1.0)
         self._setup_control_panel(control_title, self._control_parent)
         self._setup_scoreboard(scoreboard_title)
 
@@ -262,6 +268,7 @@ class MatrixGameDisplays:
         self.listener_thread.start()
         self.process_queue()
         self.root.after(100, self._apply_fullscreen_layout)
+        self.root.after(350, self._apply_centered_scaled_layout)
 
     def _apply_fullscreen_layout(self) -> None:
         """Primary monitor: control fullscreen. Secondary: scoreboard fullscreen (Windows + Linux)."""
@@ -298,6 +305,74 @@ class MatrixGameDisplays:
                 self.score_window.geometry(f"{sw - half}x{sh}+{half}+0")
         except tk.TclError:
             pass
+        self.root.after(120, self._apply_centered_scaled_layout)
+
+    def _make_fonts(self, scale_ctrl: float, scale_sb: float) -> None:
+        def f(n: int, bold: bool, sc: float) -> tkfont.Font:
+            ps = max(8, int(n * sc))
+            return tkfont.Font(family="Arial", size=ps, weight="bold" if bold else "normal")
+
+        self._fonts = {
+            "title": f(17, True, scale_ctrl),
+            "section": f(11, False, scale_ctrl),
+            "player_btn": f(13, True, scale_ctrl),
+            "diff_btn": f(11, True, scale_ctrl),
+            "run": f(14, True, scale_ctrl),
+            "exit": f(12, True, scale_ctrl),
+            "sb_state": f(20, True, scale_sb),
+            "sb_turn": f(21, True, scale_sb),
+            "sb_detail": f(13, False, scale_sb),
+            "sb_scores": f(15, False, scale_sb),
+            "sb_winner": f(22, True, scale_sb),
+        }
+
+    def _apply_centered_scaled_layout(self) -> None:
+        """Scale fonts from each window size; panels stay centered via place(..., relx/rely 0.5)."""
+        if not self.gui_running:
+            return
+        try:
+            self.root.update_idletasks()
+            rw = max(self.root.winfo_width(), 1)
+            rh = max(self.root.winfo_height(), 1)
+            if rw < 80 or rh < 80:
+                self.root.after(100, self._apply_centered_scaled_layout)
+                return
+            sc = max(0.65, min(2.0, min(rw, rh) / 640.0))
+            self._ui_scale = sc
+
+            self.score_window.update_idletasks()
+            sw = max(self.score_window.winfo_width(), 1)
+            sh = max(self.score_window.winfo_height(), 1)
+            ssb = max(0.65, min(2.0, min(sw, sh) / 640.0)) if sw >= 80 and sh >= 80 else sc
+
+            self._make_fonts(sc, ssb)
+
+            for w, key in (
+                (getattr(self, "_lbl_control_title", None), "title"),
+                (getattr(self, "_lbl_players", None), "section"),
+                (getattr(self, "_lbl_difficulty", None), "section"),
+                (getattr(self, "_btn_run", None), "run"),
+                (getattr(self, "_btn_exit", None), "exit"),
+            ):
+                if w is not None and key in self._fonts:
+                    w.config(font=self._fonts[key])
+
+            for btn in self.player_buttons:
+                btn.config(font=self._fonts["player_btn"])
+            for btn in self.diff_buttons:
+                btn.config(font=self._fonts["diff_btn"])
+
+            for w, key in (
+                (self.lbl_state, "sb_state"),
+                (self.lbl_turn, "sb_turn"),
+                (self.lbl_detail, "sb_detail"),
+                (self.lbl_scores, "sb_scores"),
+                (self.lbl_winner, "sb_winner"),
+            ):
+                if w is not None and key in self._fonts:
+                    w.config(font=self._fonts[key])
+        except tk.TclError:
+            pass
 
     def _style_player_btn(self, btn: tk.Button, selected: bool) -> None:
         btn.config(
@@ -324,32 +399,33 @@ class MatrixGameDisplays:
         )
 
     def _setup_control_panel(self, control_title: str, parent: tk.Widget):
-        title = tk.Label(
+        self._lbl_control_title = tk.Label(
             parent,
             text=control_title,
-            font=("Arial", 17, "bold"),
+            font=self._fonts["title"],
             bg=self._panel_bg,
             fg="#dfe6e9",
         )
-        title.pack(pady=(18, 10))
+        self._lbl_control_title.pack(pady=(18, 10))
 
-        tk.Label(
+        self._lbl_players = tk.Label(
             parent,
             text="Players",
-            font=("Arial", 11),
+            font=self._fonts["section"],
             bg=self._panel_bg,
             fg="#74b9ff",
-        ).pack(pady=(8, 2))
+        )
+        self._lbl_players.pack(pady=(8, 2))
 
         self.players_var = tk.IntVar(value=self.min_players)
-        self.player_buttons: list[tk.Button] = []
+        self.player_buttons = []
         btn_frame = tk.Frame(parent, bg=self._panel_bg)
         btn_frame.pack()
         for i in range(self.min_players, self.max_players + 1):
             btn = tk.Button(
                 btn_frame,
                 text=str(i),
-                font=("Arial", 13, "bold"),
+                font=self._fonts["player_btn"],
                 width=3,
                 height=1,
                 cursor="hand2",
@@ -359,16 +435,17 @@ class MatrixGameDisplays:
             btn.pack(side=tk.LEFT, padx=4, pady=4)
             self.player_buttons.append(btn)
 
-        tk.Label(
+        self._lbl_difficulty = tk.Label(
             parent,
             text="Difficulty",
-            font=("Arial", 11),
+            font=self._fonts["section"],
             bg=self._panel_bg,
             fg="#fd79a8",
-        ).pack(pady=(16, 2))
+        )
+        self._lbl_difficulty.pack(pady=(16, 2))
 
         self.difficulty_var = tk.IntVar(value=2)
-        self.diff_buttons: list[tk.Button] = []
+        self.diff_buttons = []
         d_frame = tk.Frame(parent, bg=self._panel_bg)
         d_frame.pack()
         labels = ["Easy", "Normal", "Hard"]
@@ -376,7 +453,7 @@ class MatrixGameDisplays:
             btn = tk.Button(
                 d_frame,
                 text=lab,
-                font=("Arial", 11, "bold"),
+                font=self._fonts["diff_btn"],
                 width=9,
                 height=2,
                 cursor="hand2",
@@ -389,10 +466,10 @@ class MatrixGameDisplays:
         act = tk.Frame(parent, bg=self._panel_bg)
         act.pack(fill=tk.X, padx=28, pady=(20, 8))
 
-        tk.Button(
+        self._btn_run = tk.Button(
             act,
             text="▶  Run game",
-            font=("Arial", 14, "bold"),
+            font=self._fonts["run"],
             bg="#00b894",
             fg="white",
             activebackground="#00cec9",
@@ -402,12 +479,13 @@ class MatrixGameDisplays:
             cursor="hand2",
             pady=10,
             command=self.send_start,
-        ).pack(fill=tk.X, pady=(0, 10))
+        )
+        self._btn_run.pack(fill=tk.X, pady=(0, 10))
 
-        tk.Button(
+        self._btn_exit = tk.Button(
             act,
             text="✕  Exit",
-            font=("Arial", 12, "bold"),
+            font=self._fonts["exit"],
             bg="#2d3436",
             fg="#ff7675",
             activebackground="#636e72",
@@ -417,7 +495,8 @@ class MatrixGameDisplays:
             cursor="hand2",
             pady=8,
             command=self.send_quit,
-        ).pack(fill=tk.X)
+        )
+        self._btn_exit.pack(fill=tk.X)
 
     def _select_players(self, num: int):
         self.players_var.set(num)
@@ -435,13 +514,15 @@ class MatrixGameDisplays:
         self.score_window.title(scoreboard_title)
         self.score_window.configure(bg="#000000")
 
-        score_body = tk.Frame(self.score_window, bg="black")
-        score_body.pack(fill=tk.BOTH, expand=True)
+        score_outer = tk.Frame(self.score_window, bg="black")
+        score_outer.pack(fill=tk.BOTH, expand=True)
+        score_body = tk.Frame(score_outer, bg="black")
+        score_body.place(relx=0.5, rely=0.5, anchor="center")
 
         self.lbl_state = tk.Label(
             score_body,
             text="Waiting for start…",
-            font=("Arial", 20, "bold"),
+            font=self._fonts["sb_state"],
             bg="black",
             fg="#fdcb6e",
         )
@@ -450,7 +531,7 @@ class MatrixGameDisplays:
         self.lbl_turn = tk.Label(
             score_body,
             text="",
-            font=("Arial", 21, "bold"),
+            font=self._fonts["sb_turn"],
             bg="black",
             fg="#74b9ff",
         )
@@ -459,27 +540,27 @@ class MatrixGameDisplays:
         self.lbl_detail = tk.Label(
             score_body,
             text="",
-            font=("Arial", 13),
+            font=self._fonts["sb_detail"],
             bg="black",
             fg="#b2bec3",
             justify=tk.LEFT,
         )
-        self.lbl_detail.pack(pady=8, padx=12, anchor="w")
+        self.lbl_detail.pack(pady=8, padx=12, anchor="center")
 
         self.lbl_scores = tk.Label(
             score_body,
             text="",
-            font=("Arial", 15),
+            font=self._fonts["sb_scores"],
             bg="black",
             fg="#dfe6e9",
-            justify=tk.LEFT,
+            justify=tk.CENTER,
         )
-        self.lbl_scores.pack(pady=12, padx=12, anchor="w")
+        self.lbl_scores.pack(pady=12, padx=12, anchor="center")
 
         self.lbl_winner = tk.Label(
             score_body,
             text="",
-            font=("Arial", 22, "bold"),
+            font=self._fonts["sb_winner"],
             bg="black",
             fg="#55efc4",
         )
