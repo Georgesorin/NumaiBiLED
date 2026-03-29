@@ -145,9 +145,6 @@ def _start_speedbuild(ctx: DualRuntimeCtx, players: int, difficulty: int) -> Non
 def _on_command(ctx: DualRuntimeCtx, cmd: str, data: dict) -> None:
     if cmd == "start":
         _start_speedbuild(ctx, int(data.get("players", 2)), int(data.get("difficulty", 2)))
-    elif cmd == "restart":
-        if ctx.game is not None:
-            ctx.game.restart()
     elif cmd == "quit":
         ctx.running = False
         if ctx.game is not None:

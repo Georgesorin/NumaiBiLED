@@ -118,9 +118,6 @@ def _on_command(ctx: DualRuntimeCtx, cmd: str, data: dict) -> None:
         pl = min(6, max(2, pl))
         diff = int(data.get("difficulty", 2))
         _start_game1(ctx, pl, diff)
-    elif cmd == "restart":
-        if ctx.game is not None:
-            ctx.game.restart()
     elif cmd == "quit":
         ctx.running = False
         if ctx.game is not None:

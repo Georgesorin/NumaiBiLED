@@ -7,13 +7,125 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import socket
+import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 
 LOCAL_IP = "127.0.0.1"
+
+# (x, y, width, height, is_primary)
+MonitorInfo = Tuple[int, int, int, int, bool]
+
+
+def _enum_monitors_windows() -> list[MonitorInfo]:
+    """Enumerate monitors via Win32 (primary flag from MONITORINFO)."""
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", RECT),
+                ("rcWork", RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        MONITORINFOF_PRIMARY = 1
+        results: list[MonitorInfo] = []
+
+        MonitorEnumProc = ctypes.WINFUNCTYPE(
+            ctypes.c_bool,
+            wintypes.HMONITOR,
+            wintypes.HDC,
+            ctypes.POINTER(RECT),
+            wintypes.LPARAM,
+        )
+
+        def _cb(h_monitor, _hdc, _lprc, _data):
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if not user32.GetMonitorInfoW(h_monitor, ctypes.byref(mi)):
+                return True
+            r = mi.rcMonitor
+            w = r.right - r.left
+            h = r.bottom - r.top
+            primary = bool(mi.dwFlags & MONITORINFOF_PRIMARY)
+            results.append((int(r.left), int(r.top), int(w), int(h), primary))
+            return True
+
+        cb = MonitorEnumProc(_cb)
+        user32.EnumDisplayMonitors(None, None, cb, 0)
+        return results
+    except Exception:
+        return []
+
+
+def _enum_monitors_xrandr() -> list[MonitorInfo]:
+    """Linux/X11: parse `xrandr --query` (no primary flag → first is treated as primary later)."""
+    try:
+        out = subprocess.check_output(
+            ["xrandr", "--query"],
+            text=True,
+            timeout=4,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    found: list[MonitorInfo] = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or parts[1] != "connected":
+            continue
+        m = re.search(r"(\d+)x(\d+)\+(\d+)\+(\d+)", line)
+        if not m:
+            continue
+        w, h, x, y = map(int, m.groups())
+        is_primary = bool(re.search(r"\bprimary\b", line))
+        found.append((x, y, w, h, is_primary))
+    return found
+
+
+def _enum_monitors() -> list[MonitorInfo]:
+    mons = _enum_monitors_windows()
+    if mons:
+        return mons
+    return _enum_monitors_xrandr()
+
+
+def _pick_primary_secondary(
+    monitors: list[MonitorInfo],
+) -> tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple[int, int, int, int]]]:
+    """Return (primary_rect, secondary_rect) as (x,y,w,h); secondary None if single monitor."""
+    if not monitors:
+        return None, None
+    primary_t = next((m for m in monitors if m[4]), None)
+    if primary_t is None:
+        primary_t = min(monitors, key=lambda m: (m[0], m[1]))
+    px, py, pw, ph, _ = primary_t
+    primary_rect = (px, py, pw, ph)
+    others = [m for m in monitors if m != primary_t]
+    if not others:
+        return primary_rect, None
+    sx, sy, sw, sh, _ = others[0]
+    return primary_rect, (sx, sy, sw, sh)
 
 # Bidirectional UDP (game ↔ Tk): game binds GAME, sends state to GUI; GUI binds GUI, sends cmds to GAME.
 # Pair 4626 / 7800; GUI listen port uses 7800 + 1 (7801) so the base 7800 stays the documented “state” side.
@@ -29,6 +141,23 @@ class DualRuntimeCtx:
         self.game = None
         self.net = None
         self.quit_from_remote = threading.Event()
+
+
+def _process_udp_command(
+    ctx: DualRuntimeCtx,
+    on_command: Callable[[DualRuntimeCtx, str, dict], None],
+    data: bytes,
+) -> None:
+    try:
+        cmd_data = json.loads(data.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+    raw = cmd_data.get("cmd")
+    if raw is None:
+        return
+    cmd = raw.strip().lower() if isinstance(raw, str) else raw
+    if cmd:
+        on_command(ctx, cmd, cmd_data)
 
 
 def run_gui_udp_loop(
@@ -60,11 +189,9 @@ def run_gui_udp_loop(
             pass
 
         try:
-            data, _ = gui_sock.recvfrom(4096)
-            cmd_data = json.loads(data.decode("utf-8"))
-            cmd = cmd_data.get("cmd")
-            if cmd:
-                on_command(ctx, cmd, cmd_data)
+            gui_sock.settimeout(0.1)
+            data, _ = gui_sock.recvfrom(65536)
+            _process_udp_command(ctx, on_command, data)
         except socket.timeout:
             pass
         except Exception:
@@ -107,7 +234,6 @@ class MatrixGameDisplays:
         self.game_bind_port = game_bind_port
 
         self.root.title(control_title)
-        self.root.geometry("440x580")
         self.root.configure(bg="#1e272e")
 
         self._panel_bg = "#1e272e"
@@ -126,12 +252,52 @@ class MatrixGameDisplays:
         self.min_players = min_players
         self.max_players = max_players
 
-        self._setup_control_panel(control_title)
+        self._control_parent = tk.Frame(self.root, bg=self._panel_bg)
+        self._control_parent.pack(fill=tk.BOTH, expand=True)
+
+        self._setup_control_panel(control_title, self._control_parent)
         self._setup_scoreboard(scoreboard_title)
 
         self.listener_thread = threading.Thread(target=self._listen_to_game, daemon=True)
         self.listener_thread.start()
         self.process_queue()
+        self.root.after(100, self._apply_fullscreen_layout)
+
+    def _apply_fullscreen_layout(self) -> None:
+        """Primary monitor: control fullscreen. Secondary: scoreboard fullscreen (Windows + Linux)."""
+        if not self.gui_running:
+            return
+        try:
+            self.root.update_idletasks()
+            primary, secondary = _pick_primary_secondary(_enum_monitors())
+            if primary and secondary:
+                px, py, pw, ph = primary
+                sx, sy, sw, sh = secondary
+                self.root.geometry(f"{pw}x{ph}+{px}+{py}")
+                self.root.deiconify()
+                self.root.lift()
+                self.root.attributes("-fullscreen", True)
+                self.score_window.geometry(f"{sw}x{sh}+{sx}+{sy}")
+                self.score_window.deiconify()
+                self.score_window.lift()
+                self.score_window.attributes("-fullscreen", True)
+            elif primary:
+                px, py, pw, ph = primary
+                self.root.geometry(f"{pw}x{ph}+{px}+{py}")
+                self.root.attributes("-fullscreen", True)
+                half = max(pw // 2, 1)
+                self.score_window.attributes("-fullscreen", False)
+                self.score_window.geometry(f"{pw - half}x{ph}+{px + half}+{py}")
+            else:
+                sw = self.root.winfo_screenwidth()
+                sh = self.root.winfo_screenheight()
+                self.root.geometry(f"{sw}x{sh}+0+0")
+                self.root.attributes("-fullscreen", True)
+                half = max(sw // 2, 1)
+                self.score_window.attributes("-fullscreen", False)
+                self.score_window.geometry(f"{sw - half}x{sh}+{half}+0")
+        except tk.TclError:
+            pass
 
     def _style_player_btn(self, btn: tk.Button, selected: bool) -> None:
         btn.config(
@@ -157,9 +323,9 @@ class MatrixGameDisplays:
             bd=3 if selected else 2,
         )
 
-    def _setup_control_panel(self, control_title: str):
+    def _setup_control_panel(self, control_title: str, parent: tk.Widget):
         title = tk.Label(
-            self.root,
+            parent,
             text=control_title,
             font=("Arial", 17, "bold"),
             bg=self._panel_bg,
@@ -168,7 +334,7 @@ class MatrixGameDisplays:
         title.pack(pady=(18, 10))
 
         tk.Label(
-            self.root,
+            parent,
             text="Players",
             font=("Arial", 11),
             bg=self._panel_bg,
@@ -177,7 +343,7 @@ class MatrixGameDisplays:
 
         self.players_var = tk.IntVar(value=self.min_players)
         self.player_buttons: list[tk.Button] = []
-        btn_frame = tk.Frame(self.root, bg=self._panel_bg)
+        btn_frame = tk.Frame(parent, bg=self._panel_bg)
         btn_frame.pack()
         for i in range(self.min_players, self.max_players + 1):
             btn = tk.Button(
@@ -194,7 +360,7 @@ class MatrixGameDisplays:
             self.player_buttons.append(btn)
 
         tk.Label(
-            self.root,
+            parent,
             text="Difficulty",
             font=("Arial", 11),
             bg=self._panel_bg,
@@ -203,7 +369,7 @@ class MatrixGameDisplays:
 
         self.difficulty_var = tk.IntVar(value=2)
         self.diff_buttons: list[tk.Button] = []
-        d_frame = tk.Frame(self.root, bg=self._panel_bg)
+        d_frame = tk.Frame(parent, bg=self._panel_bg)
         d_frame.pack()
         labels = ["Easy", "Normal", "Hard"]
         for idx, lab in enumerate(labels, start=1):
@@ -220,7 +386,7 @@ class MatrixGameDisplays:
             btn.pack(side=tk.LEFT, padx=5, pady=6)
             self.diff_buttons.append(btn)
 
-        act = tk.Frame(self.root, bg=self._panel_bg)
+        act = tk.Frame(parent, bg=self._panel_bg)
         act.pack(fill=tk.X, padx=28, pady=(20, 8))
 
         tk.Button(
@@ -236,21 +402,6 @@ class MatrixGameDisplays:
             cursor="hand2",
             pady=10,
             command=self.send_start,
-        ).pack(fill=tk.X, pady=(0, 10))
-
-        tk.Button(
-            act,
-            text="↺  Reset session",
-            font=("Arial", 12, "bold"),
-            bg="#6c5ce7",
-            fg="#dfe6e9",
-            activebackground="#a29bfe",
-            activeforeground="#1e272e",
-            relief=tk.SUNKEN,
-            bd=3,
-            cursor="hand2",
-            pady=8,
-            command=self.send_restart,
         ).pack(fill=tk.X, pady=(0, 10))
 
         tk.Button(
@@ -282,11 +433,13 @@ class MatrixGameDisplays:
     def _setup_scoreboard(self, scoreboard_title: str):
         self.score_window = tk.Toplevel(self.root)
         self.score_window.title(scoreboard_title)
-        self.score_window.geometry("520x560")
         self.score_window.configure(bg="#000000")
 
+        score_body = tk.Frame(self.score_window, bg="black")
+        score_body.pack(fill=tk.BOTH, expand=True)
+
         self.lbl_state = tk.Label(
-            self.score_window,
+            score_body,
             text="Waiting for start…",
             font=("Arial", 20, "bold"),
             bg="black",
@@ -295,7 +448,7 @@ class MatrixGameDisplays:
         self.lbl_state.pack(pady=16)
 
         self.lbl_turn = tk.Label(
-            self.score_window,
+            score_body,
             text="",
             font=("Arial", 21, "bold"),
             bg="black",
@@ -304,7 +457,7 @@ class MatrixGameDisplays:
         self.lbl_turn.pack(pady=6)
 
         self.lbl_detail = tk.Label(
-            self.score_window,
+            score_body,
             text="",
             font=("Arial", 13),
             bg="black",
@@ -314,7 +467,7 @@ class MatrixGameDisplays:
         self.lbl_detail.pack(pady=8, padx=12, anchor="w")
 
         self.lbl_scores = tk.Label(
-            self.score_window,
+            score_body,
             text="",
             font=("Arial", 15),
             bg="black",
@@ -324,7 +477,7 @@ class MatrixGameDisplays:
         self.lbl_scores.pack(pady=12, padx=12, anchor="w")
 
         self.lbl_winner = tk.Label(
-            self.score_window,
+            score_body,
             text="",
             font=("Arial", 22, "bold"),
             bg="black",
@@ -349,9 +502,6 @@ class MatrixGameDisplays:
                 "difficulty": self.difficulty_var.get(),
             }
         )
-
-    def send_restart(self):
-        self.send_command({"cmd": "restart"})
 
     def send_quit(self):
         self.send_command({"cmd": "quit"})
