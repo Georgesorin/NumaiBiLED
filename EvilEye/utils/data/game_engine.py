@@ -50,6 +50,11 @@ class GameEngine:
     def clear(self):
         self.set_all(0, 0, 0)
 
+    def clear_buttons(self):
+        for wall in range(1, NUM_WALLS + 1):
+            for led in range(1, LEDS_PER_WALL):
+                self.set_led(wall, led, 0, 0, 0)
+
     def render(self):
         # build_frame_data is now in network.py, but we'll import it if needed
         # or just keep the core buffer rendering here if preferred.
