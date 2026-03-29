@@ -17,6 +17,15 @@ class GameStartState(GameState):
     def enter(self, engine):
         self.timer = 0.0
         self.spawned = False
+        try:
+            from ..data.audio_manager import get_audio_manager
+            import os, random
+            _audio = get_audio_manager()
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'music'))
+            m_path = os.path.join(base, random.choice(['tile_music_1.wav', 'tile_music_2.wav']))
+            _audio.play_music(m_path, loop=-1, fade_ms=600)
+        except Exception:
+            pass
 
     def update(self, engine, dt: float):
         self.timer += dt

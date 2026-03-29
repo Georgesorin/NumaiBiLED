@@ -14,6 +14,12 @@ class GameOverState(GameState):
 
     def enter(self, engine):
         self.timer = 0.0
+        try:
+            from ..data.audio_manager import get_audio_manager
+            _audio = get_audio_manager()
+            _audio.stop_music(fade_ms=600)
+        except Exception:
+            pass
 
     def update(self, engine, dt: float):
         self.timer += dt

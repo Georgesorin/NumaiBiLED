@@ -5,6 +5,29 @@ from ..ui.colors import *
 
 from ..scaling.spawn_rules import SpawnRules
 
+_sfx_pressed = None
+_sfx_timeout = None
+_sfx_loaded = False
+
+def _load_sfx():
+    global _sfx_pressed, _sfx_timeout, _sfx_loaded
+    if _sfx_loaded: return
+    try:
+        import pygame
+        import os
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+        base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'sfx'))
+        p1 = os.path.join(base, 'tile_pressed.wav')
+        p2 = os.path.join(base, 'tile_fade.wav')
+        if os.path.exists(p1):
+            _sfx_pressed = pygame.mixer.Sound(p1)
+        if os.path.exists(p2):
+            _sfx_timeout = pygame.mixer.Sound(p2)
+        _sfx_loaded = True
+    except Exception:
+        pass
+
 DARK_BLUE = (0, 0, 100)
 
 def _build_thick_border_one_lap(board_w, board_h, thickness):
@@ -42,6 +65,7 @@ class PlayState(GameState):
         self.border_path_len = len(self.border_path)
 
     def enter(self, engine):
+        _load_sfx()
         self.round_timer_curr = 0.0
         keep_alive = self.settings.get_tile_timeout(self.round_num)
         for ent in engine.entities:
@@ -59,12 +83,23 @@ class PlayState(GameState):
             if isinstance(ent, Tile) and ent.alive:
                 for px, py in held_xy:
                     if ent.contains_tile(px, py):
+                        if time.time() - ent.last_pressed_time > 0.2:
+                            if _sfx_pressed:
+                                try:
+                                    _sfx_pressed.play()
+                                except Exception:
+                                    pass
                         ent.press()
                         break
 
         for ent in engine.entities:
             if isinstance(ent, Tile) and ent.alive:
                 if ent.should_kill:
+                    if _sfx_timeout:
+                        try:
+                            _sfx_timeout.play()
+                        except Exception:
+                            pass
                     ent.alive = False
                     return ("end", {"reason": "timeout", "round_num": self.round_num})
 
