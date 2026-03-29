@@ -1,7 +1,7 @@
 import random
 import math
 from ._abs_state import GameEngine, GameState
-from ..data.pattern_memory_data import BLACKOUT_DEBUFF_DURATION
+from ..data.pattern_memory_data import BLACKOUT_DEBUFF_DURATION, powerup_button_pair
 from ..ui.colors import BLACK, GREEN
 from ..ui.pattern_memory_ui import light_player_buttons, animate_eyes, animate_powerup_buttons
 
@@ -79,8 +79,7 @@ class PlayState(GameState):
             return ("end", {"players": self.players})
 
     def _handle_powerup_press(self, engine, player, pressed):
-        btn_rainbow = player.buttons[0]
-        btn_flash = player.buttons[1]
+        btn_rainbow, btn_flash = powerup_button_pair(player.buttons)
 
         for (wall, led) in pressed:
             if wall != player.wall or led not in player.buttons:

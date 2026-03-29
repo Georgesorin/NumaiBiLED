@@ -2,7 +2,11 @@ import math
 import colorsys
 from .colors import BLACK, GREEN, RED, WHITE
 from ..data.pattern_memory_data import (
-    PLAYER_CONFIGS, SHOW_COLOR_DURATION, SHOW_PAUSE_DURATION, LOOP_GAP_DURATION
+    PLAYER_CONFIGS,
+    SHOW_COLOR_DURATION,
+    SHOW_PAUSE_DURATION,
+    LOOP_GAP_DURATION,
+    powerup_button_pair,
 )
 
 def light_player_buttons(engine, players, pattern, blackout_targets, powerup_player):
@@ -42,11 +46,10 @@ def animate_eyes(engine, t, num_players, pattern, players):
             engine.set_eye(w, *GREEN)
 
 def animate_powerup_buttons(engine, t, powerup_player):
-    """Rainbow cycle on button[0], flashing white on button[1]."""
+    """Rainbow cycle on the left centre power-up button, flash on the right."""
     if powerup_player is None or powerup_player.used_powerup:
         return
-    btn_rainbow = powerup_player.buttons[0]
-    btn_flash = powerup_player.buttons[1]
+    btn_rainbow, btn_flash = powerup_button_pair(powerup_player.buttons)
 
     hue = (t * 0.2) % 1.0
     r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)

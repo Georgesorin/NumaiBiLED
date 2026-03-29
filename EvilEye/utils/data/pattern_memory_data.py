@@ -1,4 +1,3 @@
-import random
 from .game_engine import NUM_WALLS, LEDS_PER_WALL
 from ..ui.colors import (
     BLACK, WHITE, RED, YELLOW, GREEN, BLUE, CYAN, MAGENTA, ORANGE, PURPLE,
@@ -61,14 +60,28 @@ def build_players(num_players):
     return players
 
 
+def _centered_buttons(buttons, count):
+    """Contiguous slice of `count` buttons from the middle of the row (shorter patterns stay centered)."""
+    n = len(buttons)
+    k = min(count, n)
+    if k <= 0:
+        return []
+    start = (n - k) // 2
+    return buttons[start : start + k]
+
+
+def powerup_button_pair(buttons):
+    """The two centre physical buttons: rainbow effect, then flash (same order as before)."""
+    pair = _centered_buttons(buttons, 2)
+    return pair[0], pair[1]
+
+
 def assign_colors(players, pattern):
     for p in players:
         usable = min(len(pattern), len(p.buttons))
         mapping = {}
-        shuffled_buttons = list(p.buttons)
-        random.shuffle(shuffled_buttons)
-        for i in range(usable):
-            mapping[shuffled_buttons[i]] = pattern[i]
+        for btn, color in zip(_centered_buttons(p.buttons, usable), pattern):
+            mapping[btn] = color
         for btn in p.buttons:
             if btn not in mapping:
                 mapping[btn] = BLACK
