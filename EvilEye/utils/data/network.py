@@ -27,27 +27,50 @@ PASSWORD_ARRAY = [
     168, 45, 198, 6, 43, 11, 57, 88, 182, 84, 189, 29, 35, 143, 138, 171,
 ]
 
+
+def _calc_sum(data: bytes | bytearray) -> int:
+    return PASSWORD_ARRAY[sum(data) & 0xFF]
+
+
 def calculate_checksum(data):
-    idx = sum(data) & 0xFF
-    return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
+    return _calc_sum(data)
+
+# Evil Eye UDP: commands to device, receive button state from device
+EVIL_EYE_SEND_PORT = 4626
+EVIL_EYE_RECV_PORT = 7800
+
 
 def load_config(cfg_file=None):
     defaults = {
         "device_ip": "255.255.255.255",
-        "send_port": 50267,
-        "recv_port": 50367,
+        "send_port": EVIL_EYE_SEND_PORT,
+        "recv_port": EVIL_EYE_RECV_PORT,
         "bind_ip": "0.0.0.0",
         "polling_rate_ms": 100,
     }
     if cfg_file is None:
-        return defaults
+        return dict(defaults)
     try:
         if os.path.exists(cfg_file):
             with open(cfg_file, encoding="utf-8") as f:
-                return {**defaults, **json.load(f)}
+                raw = json.load(f)
+            return {**defaults, **raw}
     except Exception:
         pass
-    return defaults
+    return dict(defaults)
+
+
+def save_config(cfg, cfg_file):
+    """Write config dict to JSON (caller should merge with load_config first)."""
+    try:
+        parent = os.path.dirname(os.path.abspath(cfg_file))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        return True
+    except Exception:
+        return False
 
 def _build_start_packet(seq):
     pkt = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), 0x00, 0x08, 0x02, 0x00, 0x00, 0x33, 0x44, (seq >> 8) & 0xFF, seq & 0xFF, 0x00, 0x00])
@@ -84,29 +107,121 @@ def build_frame_data(led_states):
             frame[led * 12 + 8 + wall_idx] = b
     return bytes(frame)
 
-def get_local_interfaces():
+def _get_local_interfaces():
+    """Return [(iface_name, ip, broadcast), ...] for all active IPv4 interfaces."""
     results = []
     try:
         import psutil
         for iface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
                 if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
-                    bcast = addr.broadcast if addr.broadcast else "255.255.255.255"
+                    try:
+                        import ipaddress
+                        net = ipaddress.IPv4Network(
+                            f"{addr.address}/{addr.netmask}", strict=False)
+                        bcast = str(net.broadcast_address)
+                    except Exception:
+                        bcast = "255.255.255.255"
                     results.append((iface, addr.address, bcast))
     except ImportError:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
-            ip = info[4][0]
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
             if ip != "127.0.0.1":
-                results.append(("?", ip, "255.255.255.255"))
+                results.append(("default", ip, "255.255.255.255"))
+        except Exception:
+            pass
+    results.append(("loopback (simulator)", "127.0.0.1", "127.0.0.1"))
     return results
 
-def build_discovery_packet():
-    rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
-    payload = bytearray([0x0A, 0x02, *b"KX-HC04", 0x03, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x14])
+
+def get_local_interfaces():
+    return _get_local_interfaces()
+
+
+def _build_discovery_packet():
+    """Build the 0x67 Evil Eye discovery broadcast packet."""
+    rand1 = random.randint(0, 127)
+    rand2 = random.randint(0, 127)
+    payload = bytearray([0x0A, 0x02, *b"KX-HC04", 0x03,
+                         0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x14])
     pkt = bytearray([0x67, rand1, rand2, len(payload)]) + payload
-    pkt.append(calculate_checksum(pkt))
-    return pkt, rand1, rand2
+    pkt.append(_calc_sum(pkt))
+    return bytes(pkt), rand1, rand2
+
+
+def build_discovery_packet():
+    pkt, r1, r2 = _build_discovery_packet()
+    return bytearray(pkt), r1, r2
+
+
+def _run_discovery(bind_ip: str, broadcast_ip: str, timeout: float = 3.0) -> str | None:
+    """
+    Broadcast a discovery packet and return the first responding device IP,
+    or None if nothing is found within `timeout` seconds.
+    Binds on port 7800 (the standard Evil Eye receive port).
+    """
+    pkt, rand1, rand2 = _build_discovery_packet()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(0.5)
+    try:
+        sock.bind((bind_ip if bind_ip != "127.0.0.1" else "0.0.0.0", 7800))
+    except OSError:
+        try:
+            sock.bind(("0.0.0.0", 7800))
+        except OSError:
+            sock.close()
+            return None
+
+    try:
+        sock.sendto(pkt, (broadcast_ip, 4626))
+    except OSError:
+        sock.close()
+        return None
+
+    found = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            data, addr = sock.recvfrom(1024)
+            if (len(data) >= 30 and data[0] == 0x68
+                    and data[1] == rand1 and data[2] == rand2):
+                found = addr[0]
+                break
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+    sock.close()
+    return found
+
+
+def discover_device_ip(timeout_per_iface: float = 3.0) -> str | None:
+    """Try each local interface until an Evil Eye device responds."""
+    for _iface, local_ip, bcast in _get_local_interfaces():
+        found = _run_discovery(local_ip, bcast, timeout=timeout_per_iface)
+        if found:
+            return found
+    return None
+
+
+def configure_from_discovery(cfg: dict, cfg_file: str | None = None) -> tuple[dict, bool]:
+    """
+    Discover a device, set device_ip and standard Evil Eye UDP ports,
+    optionally persist to cfg_file. Returns (cfg, True) if a device was found.
+    """
+    found = discover_device_ip()
+    if found:
+        cfg["device_ip"] = found
+        cfg["send_port"] = EVIL_EYE_SEND_PORT
+        cfg["recv_port"] = EVIL_EYE_RECV_PORT
+        if cfg_file:
+            save_config(cfg, cfg_file)
+        return cfg, True
+    return cfg, False
+
 
 def run_discovery_flow():
     interfaces = get_local_interfaces()
@@ -150,8 +265,8 @@ class NetworkManager:
         self._seq = 0
         self._lock = threading.Lock()
         self.send_ip = config.get("device_ip", "169.254.182.44")
-        self.send_port = config.get("send_port", 4626)
-        self.recv_port = config.get("recv_port", 7800)
+        self.send_port = int(config.get("send_port", EVIL_EYE_SEND_PORT))
+        self.recv_port = int(config.get("recv_port", EVIL_EYE_RECV_PORT))
         self.poll_rate_ms = config.get("polling_rate_ms", 100)
         self._sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
