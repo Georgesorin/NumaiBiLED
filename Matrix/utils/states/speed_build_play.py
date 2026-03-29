@@ -34,6 +34,8 @@ class SBPlayState(GameState):
         
         self.settings.total_time = self.play_duration
         self.settings.status_text = "BUILD"
+        self.settings.hide_timer = False
+        self.settings.hide_status = False
 
         # Audio placeholders
         self._pygame = pygame

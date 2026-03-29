@@ -15,6 +15,8 @@ class SBInitState(GameState):
         self.settings.status_text = "LOBBY"
         self.settings.time_left = 0.0
         self.settings.total_time = 0.0
+        self.settings.hide_timer = True
+        self.settings.hide_status = True
         self.display_timer = 0.0
         self.current_drawing = [[BLACK for _ in range(6)] for _ in range(6)]
 

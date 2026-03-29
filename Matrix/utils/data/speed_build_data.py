@@ -7,3 +7,5 @@ class SpeedBuildSettings:
         self.time_left = 0.0
         self.total_time = 0.0
         self.status_text = "LOBBY"
+        self.hide_timer = True
+        self.hide_status = True

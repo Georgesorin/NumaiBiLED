@@ -100,6 +100,19 @@ class DualScreenManager:
         text_rect = text_surf.get_rect(center=(x + width//2, y + height//2))
         screen.blit(text_surf, text_rect)
 
+    def draw_heart(self, screen, x, y, size, color):
+        """Draw a simple heart shape using polygons and circles."""
+        # Top-left circle
+        pygame.draw.circle(screen, color, (x + size//4, y + size//4), size//4)
+        # Top-right circle
+        pygame.draw.circle(screen, color, (x + 3*size//4, y + size//4), size//4)
+        # Bottom triangle
+        pygame.draw.polygon(screen, color, [
+            (x, y + size//4 + 2),
+            (x + size, y + size//4 + 2),
+            (x + size//2, y + size)
+        ])
+
     def draw_main_screen(self):
         self.main_screen.fill(self.BLACK)
 
@@ -176,7 +189,13 @@ class DualScreenManager:
         self.timer_screen.fill(self.BLACK)
 
         # Timer display
-        if settings and settings.time_left > 0:
+        hide_timer = getattr(settings, 'hide_timer', False)
+        # If we have no settings yet, we don't know the game type, 
+        # so we show the defaults unless we want to change that here.
+        # But wait, the user wants it to disappear "in the beginning" too.
+        if hide_timer:
+            timer_text = ""
+        elif settings and settings.time_left > 0:
             minutes = int(settings.time_left // 60)
             seconds = int(settings.time_left % 60)
             timer_text = f"{minutes:02d}:{seconds:02d}"
@@ -188,15 +207,19 @@ class DualScreenManager:
         else:
             timer_text = "00:00"
 
-        # Use dynamic font size based on screen dimensions
-        timer_font_size = int(self.timer_height * 0.3)
-        timer_font = pygame.font.Font(None, timer_font_size)
-        timer_surf = timer_font.render(timer_text, True, self.YELLOW)
-        timer_rect = timer_surf.get_rect(center=(self.timer_width//2, self.timer_height//3))
-        self.timer_screen.blit(timer_surf, timer_rect)
+        if timer_text:
+            # Use dynamic font size based on screen dimensions
+            timer_font_size = int(self.timer_height * 0.3)
+            timer_font = pygame.font.Font(None, timer_font_size)
+            timer_surf = timer_font.render(timer_text, True, self.YELLOW)
+            timer_rect = timer_surf.get_rect(center=(self.timer_width//2, self.timer_height//3))
+            self.timer_screen.blit(timer_surf, timer_rect)
 
         # Status
-        if settings and settings.status_text:
+        hide_status = getattr(settings, 'hide_status', False)
+        if hide_status:
+            status_text = ""
+        elif settings and hasattr(settings, 'status_text'):
             status_text = settings.status_text
             status_color = self.GREEN if settings.time_left > 0 or status_text != "LOBBY" else self.BLUE
         elif self.game_started:
@@ -206,11 +229,34 @@ class DualScreenManager:
             status_text = "WAITING"
             status_color = self.BLUE
 
-        status_font_size = int(self.timer_height * 0.15)
-        status_font = pygame.font.Font(None, status_font_size)
-        status_surf = status_font.render(status_text, True, status_color)
-        status_rect = status_surf.get_rect(center=(self.timer_width//2, self.timer_height//2))
-        self.timer_screen.blit(status_surf, status_rect)
+        if status_text:
+            status_font_size = int(self.timer_height * 0.15)
+            status_font = pygame.font.Font(None, status_font_size)
+            status_surf = status_font.render(status_text, True, status_color)
+            status_rect = status_surf.get_rect(center=(self.timer_width//2, self.timer_height//2))
+            self.timer_screen.blit(status_surf, status_rect)
+
+        # HP Bar if available
+        if settings and hasattr(settings, 'hp'):
+            hp_y = int(self.timer_height * 0.65)
+            hp_width = int(self.timer_width * 0.6)
+            hp_height = int(self.timer_height * 0.05)
+            hp_x = (self.timer_width - hp_width) // 2
+            
+            # Heart icon
+            heart_size = int(self.timer_height * 0.08)
+            self.draw_heart(self.timer_screen, self.timer_width // 2 - heart_size // 2, hp_y - heart_size - 10, heart_size, self.RED)
+            
+            # HP Bar background
+            pygame.draw.rect(self.timer_screen, self.GRAY, (hp_x, hp_y, hp_width, hp_height))
+            # Current HP
+            fill_width = int(hp_width * (settings.hp / settings.max_hp))
+            hp_color = self.GREEN if settings.hp > 50 else self.YELLOW if settings.hp > 20 else self.RED
+            pygame.draw.rect(self.timer_screen, hp_color, (hp_x, hp_y, fill_width, hp_height))
+            
+            # HP Text
+            hp_text = self.font_small.render(f"HP: {settings.hp}/{settings.max_hp}", True, self.WHITE)
+            self.timer_screen.blit(hp_text, (hp_x + hp_width + 10, hp_y))
 
         # Players info
         info_font_size = int(self.timer_height * 0.1)

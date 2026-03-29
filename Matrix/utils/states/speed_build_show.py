@@ -30,6 +30,9 @@ class SBShowState(GameState):
         
         self.settings.total_time = self.show_duration
         self.settings.status_text = "MEMORIZE"
+        self.settings.time_left = self.show_duration
+        self.settings.hide_timer = False
+        self.settings.hide_status = False
 
         # Build target drawing — cap color pool by difficulty
         colors = list(ALL_COLORS)

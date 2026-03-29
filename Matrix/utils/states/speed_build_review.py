@@ -11,6 +11,8 @@ class SBReviewState(GameState):
         self.settings, self.players, self.target_drawing = settings, players, target_drawing
         self.settings.status_text = "RESULTS"
         self.settings.time_left = 0.0
+        self.settings.hide_timer = True
+        self.settings.hide_status = False
         self.timer, self.winner, self.is_tie, self.tied_players = 0.0, None, False, []
 
     def enter(self, engine):

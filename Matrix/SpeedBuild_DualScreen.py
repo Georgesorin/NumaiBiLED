@@ -72,6 +72,8 @@ def run_speedbuild_with_dual_screen():
 
                 # Create game settings
                 settings = SpeedBuildSettings(config['players'], config['difficulty'])
+                settings.hide_timer = True
+                settings.hide_status = True
                 spawn_rules = DummySpawnRules()
 
                 def make_start(): return SBInitState(settings, spawn_rules)
