@@ -4,7 +4,7 @@ from ..ui.colors import *
 from ..data.network import BOARD_WIDTH, BOARD_HEIGHT
 from ..ui.speed_build_ui import (
     DIFFICULTY_PATTERNS, DIFFICULTY_MAX_COLORS, ALL_COLORS, PLAYER_POSITIONS,
-    get_mosaic_drawing, get_pattern_drawing, extract_colors
+    get_pattern_drawing, extract_colors
 )
 
 GRAY = (100, 100, 100)
@@ -39,12 +39,9 @@ class SBShowState(GameState):
         random.shuffle(colors)
         max_colors = DIFFICULTY_MAX_COLORS.get(self.difficulty, len(colors))
         colors = colors[:max_colors]
+        # Build target drawing — always use templates now
         patterns = DIFFICULTY_PATTERNS.get(self.difficulty, [])
-        use_template = random.random() < 0.5 and len(patterns) > 0
-        if use_template:
-            self.target_drawing = get_pattern_drawing(random.choice(patterns), colors)
-        else:
-            self.target_drawing = get_mosaic_drawing(random.randint(1, 6), colors)
+        self.target_drawing = get_pattern_drawing(random.choice(patterns), colors)
 
         # Extract only the colors actually used in this drawing
         self.colors_to_use = extract_colors(self.target_drawing)

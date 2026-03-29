@@ -3,7 +3,7 @@ from ._abs_state import GameState
 from ..ui.colors import *
 from ..ui.speed_build_ui import (
     DIFFICULTY_PATTERNS, DIFFICULTY_MAX_COLORS, ALL_COLORS,
-    get_mosaic_drawing, get_pattern_drawing
+    get_pattern_drawing
 )
 from ..data.audio_manager import get_audio_manager
 
@@ -35,12 +35,7 @@ class SBInitState(GameState):
         max_colors = DIFFICULTY_MAX_COLORS.get(difficulty, len(colors))
         colors = colors[:max_colors]
         patterns = DIFFICULTY_PATTERNS.get(difficulty, [])
-        use_template = random.random() < 0.5 and len(patterns) > 0
-        if use_template:
-            t = random.choice(patterns)
-            self.current_drawing = get_pattern_drawing(t, colors)
-        else:
-            self.current_drawing = get_mosaic_drawing(random.randint(1, 6), colors)
+        self.current_drawing = get_pattern_drawing(random.choice(patterns), colors)
 
     def update(self, engine, dt: float):
         engine.clear()
