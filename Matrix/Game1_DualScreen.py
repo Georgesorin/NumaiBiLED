@@ -1,24 +1,44 @@
-import os
-import threading
-import sys
+"""
+Keep Alive (Game 1) — panou control (touch) + scoreboard (non-touch), UDP + Tkinter.
+Rulează din folderul Matrix: python Game1_DualScreen.py
+"""
 
-# Add dual screen manager
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils/ui"))
-from dual_screen import DualScreenManager
+from __future__ import annotations
+
+import os
+import sys
+import threading
+
+_sys_root = os.path.dirname(os.path.abspath(__file__))
+if _sys_root not in sys.path:
+    sys.path.insert(0, _sys_root)
+
+import tkinter as tk
 
 from utils.data import (
     NetworkManager,
     game_thread_func,
     BOARD_WIDTH,
-    FRAME_DATA_LENGTH
+    FRAME_DATA_LENGTH,
 )
-
-from utils.scaling import SpawnRules
-
-from utils.states import GameStartState, InitialTilePatternState, TileSpawnState, PlayState, GameOverState
-
+from utils.data.network import load_config
 from utils.master import GameMaster
-from utils.ui import prompt_render
+from utils.scaling import GameSettings, SpawnRules
+from utils.states import (
+    GameStartState,
+    InitialTilePatternState,
+    TileSpawnState,
+    PlayState,
+    GameOverState,
+)
+from utils.ui.gui_dual_displays import (
+    DualRuntimeCtx,
+    MATRIX_UDP_GAME_BIND,
+    MATRIX_UDP_GUI_BIND,
+    MatrixGameDisplays,
+    cleanup_matrix_game,
+    run_gui_udp_loop,
+)
 
 transitions = {
     "start": lambda settings, spawn_rules, **kwargs: GameStartState(settings, spawn_rules, **kwargs),
@@ -28,93 +48,129 @@ transitions = {
     "end": lambda settings, spawn_rules, **kwargs: GameOverState(settings, spawn_rules, **kwargs),
 }
 
-def run_game_with_dual_screen():
-    """Run Game1 with dual screen setup"""
-    # Initialize dual screen manager
-    screen_manager = DualScreenManager("Keep Alive - Control", "Keep Alive - Timer")
 
-    print("Dual screen setup initialized.")
-    print("Use main screen to select players/difficulty and start game.")
-    print("Timer will display on secondary screen.")
+def _state_game1(game):
+    if game is None:
+        return {
+            "state": "WAITING",
+            "turn": None,
+            "scores": [],
+            "winner": None,
+            "detail": "Selectează jucători și dificultate, apoi START.",
+            "scores_label": "—",
+        }
+    st = game.engine.state
+    name = type(st).__name__ if st else "UNKNOWN"
+    detail_parts = []
+    round_num = getattr(st, "round_num", None)
+    if round_num is not None:
+        detail_parts.append(f"Rundă: {round_num}")
+    if name == "PlayState":
+        dur = getattr(st, "round_duration", 0) or 1
+        t = getattr(st, "round_timer_curr", 0)
+        detail_parts.append(f"Timp rundă: {max(0, dur - t):.1f}s / {dur:.1f}s")
+    elif name == "GameOverState":
+        detail_parts.append(f"Motiv: {getattr(st, 'reason', '')}")
+        detail_parts.append(f"Runde rezistate: {getattr(st, 'round_num', 0)}")
 
-    game = None
-    game_thread = None
-    net = None
+    scores_label = "—"
+    if name == "PlayState" and round_num is not None:
+        scores_label = f"Runda curentă: {round_num}"
+    elif name == "GameOverState":
+        scores_label = f"Ultima rundă: {getattr(st, 'round_num', 0)}"
 
-    try:
-        running = True
-        while running:
-            # Update screens and handle input
-            running = screen_manager.update()
+    return {
+        "state": name,
+        "turn": None,
+        "scores": [],
+        "winner": None,
+        "winner_text": "",
+        "show_winner": False,
+        "detail": "\n".join(detail_parts) if detail_parts else f"Jucători: {game.settings.player_count}",
+        "scores_label": scores_label,
+    }
 
-            # Check if game should start
-            if screen_manager.is_game_started() and game is None:
-                # Get configuration from dual screen
-                config = screen_manager.get_game_config()
 
-                # Create game settings (convert to expected format)
-                from utils.scaling import GameSettings
-                # Convert integer difficulty to string key
-                diff_names = ["easy", "medium", "hard"]  # Matches DIFFICULTIES keys
-                difficulty_key = diff_names[config['difficulty'] - 1]  # 1->easy, 2->medium, 3->hard
-                settings = GameSettings(config['players'], difficulty_key)
+def _start_game1(ctx: DualRuntimeCtx, players: int, difficulty: int) -> None:
+    if ctx.game is not None and ctx.game.running:
+        return
+    if ctx.game is not None and not ctx.game.running:
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
 
-                # Create game
-                spawn_rules = SpawnRules(settings, BOARD_WIDTH)
+    diff_names = ["easy", "medium", "hard"]
+    d = min(3, max(1, int(difficulty)))
+    difficulty_key = diff_names[d - 1]
+    settings = GameSettings(int(players), difficulty_key)
+    spawn_rules = SpawnRules(settings, BOARD_WIDTH)
 
-                def make_start():
-                    return GameStartState(settings, spawn_rules)
+    def make_start():
+        return GameStartState(settings, spawn_rules)
 
-                game = GameMaster(make_start, settings, spawn_rules, transitions)
-                net = NetworkManager(game)
-                net.start_bg()
+    ctx.game = GameMaster(make_start, settings, spawn_rules, transitions)
+    ctx.net = NetworkManager(ctx.game, config=load_config())
+    ctx.net.start_bg()
+    threading.Thread(target=game_thread_func, args=(ctx.game,), daemon=True).start()
 
-                # Start game thread
-                game_thread = threading.Thread(target=game_thread_func, args=(game,), daemon=True)
-                game_thread.start()
 
-                print(f"Game 1 started! Players: {config['players']}, Difficulty: {config['difficulty']}")
+def _on_command(ctx: DualRuntimeCtx, cmd: str, data: dict) -> None:
+    if cmd == "start":
+        pl = int(data.get("players", 2))
+        pl = min(6, max(2, pl))
+        diff = int(data.get("difficulty", 2))
+        _start_game1(ctx, pl, diff)
+    elif cmd == "restart":
+        if ctx.game is not None:
+            ctx.game.restart()
+    elif cmd == "quit":
+        ctx.running = False
+        if ctx.game is not None:
+            ctx.game.running = False
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+        ctx.quit_from_remote.set()
 
-            # Handle game stop/cleanup
-            if not screen_manager.is_game_started() and game is not None:
-                # User pressed stop button or game ended
-                game.running = False  # Signal game to stop
-                if net:
-                    # Clear the LED matrix
-                    black_frame = b'\x00' * FRAME_DATA_LENGTH
-                    net.send_packet(black_frame)
-                    # Stop network loops
-                    net.running = False
-                game = None
-                print("Game stopped. Select new settings to play again.")
 
-            # If game exists, handle natural game completion
-            if game and not game.running:
-                # Game ended naturally
-                if net:
-                    # Clear the LED matrix
-                    black_frame = b'\x00' * FRAME_DATA_LENGTH
-                    net.send_packet(black_frame)
-                    # Stop network loops
-                    net.running = False
-                screen_manager.game_started = False
-                game = None
-                print("Game ended. Select new settings to play again.")
+def _post_tick(ctx: DualRuntimeCtx) -> None:
+    if ctx.game is not None and not ctx.game.running:
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
 
-            # Small delay to prevent excessive CPU usage
-            import time
-            time.sleep(0.05)
 
-    except KeyboardInterrupt:
-        print("Interrupted by user")
+def main():
+    ctx = DualRuntimeCtx()
+    root = tk.Tk()
+    app = MatrixGameDisplays(
+        root,
+        ctx,
+        gui_bind_port=MATRIX_UDP_GUI_BIND,
+        game_bind_port=MATRIX_UDP_GAME_BIND,
+        control_title="Keep Alive — panou control",
+        scoreboard_title="Keep Alive — scoreboard",
+        min_players=2,
+        max_players=6,
+    )
+    threading.Thread(
+        target=run_gui_udp_loop,
+        args=(ctx, MATRIX_UDP_GAME_BIND, MATRIX_UDP_GUI_BIND, _state_game1, _on_command),
+        kwargs={"post_tick": _post_tick},
+        daemon=True,
+    ).start()
 
-    finally:
-        if game:
-            game.running = False
-        if net:
-            net.running = False
-        screen_manager.quit()
-        print("Exiting...")
+    def on_closing():
+        ctx.running = False
+        if ctx.game is not None:
+            ctx.game.running = False
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+        app.gui_running = False
+        try:
+            app.score_window.destroy()
+        except Exception:
+            pass
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    root.mainloop()
+    ctx.running = False
+    cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+
 
 if __name__ == "__main__":
-    run_game_with_dual_screen()
+    main()

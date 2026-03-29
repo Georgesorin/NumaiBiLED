@@ -1,133 +1,203 @@
-import time
-import random
+"""
+Speed Build (Memory Matrix) — panou control + scoreboard, UDP + Tkinter.
+Rulează din folderul Matrix: python3 SpeedBuild_DualScreen.py
+"""
+
+from __future__ import annotations
+
 import os
 import sys
 import threading
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils/ui"))
+_sys_root = os.path.dirname(os.path.abspath(__file__))
+if _sys_root not in sys.path:
+    sys.path.insert(0, _sys_root)
 
-from dual_screen import DualScreenManager
+import tkinter as tk
 
 from utils.data import (
-    NetworkManager, game_thread_func, load_config, FRAME_DATA_LENGTH, SpeedBuildSettings
+    NetworkManager,
+    game_thread_func,
+    FRAME_DATA_LENGTH,
+    SpeedBuildSettings,
+    load_config,
 )
-from utils.states import *
 from utils.master import GameMaster
+from utils.states import SBInitState, SBShowState, SBPlayState, SBReviewState
+from utils.ui.gui_dual_displays import (
+    DualRuntimeCtx,
+    MATRIX_UDP_GAME_BIND,
+    MATRIX_UDP_GUI_BIND,
+    MatrixGameDisplays,
+    cleanup_matrix_game,
+    run_gui_udp_loop,
+)
 
 _CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "matrix_config.json")
 
-# ============================================================
-#  Data Objects
-# ============================================================
-
-
 
 class DummySpawnRules:
-    def reset(self): pass
+    def reset(self):
+        pass
+
 
 class Player:
     def __init__(self, pid, base_x, base_y):
         self.id = pid
         self.base_x = base_x
         self.base_y = base_y
-        self.board = [[(0,0,0) for _ in range(6)] for _ in range(6)]
+        self.board = [[(0, 0, 0) for _ in range(6)] for _ in range(6)]
         self.score = 0
         self.completion_time = None
 
-# ============================================================
-#  Main Loop & Transitions
-# ============================================================
 
 transitions = {
-    "init":   lambda s, sr, **k: SBInitState(s, sr, **k),
-    "show":   lambda s, sr, **k: SBShowState(s, sr, PlayerClass=Player, **k),
-    "play":   lambda s, sr, **k: SBPlayState(s, sr, **k),
+    "init": lambda s, sr, **k: SBInitState(s, sr, **k),
+    "show": lambda s, sr, **k: SBShowState(s, sr, PlayerClass=Player, **k),
+    "play": lambda s, sr, **k: SBPlayState(s, sr, **k),
     "review": lambda s, sr, **k: SBReviewState(s, sr, **k),
 }
 
-def run_speedbuild_with_dual_screen():
-    """Run SpeedBuild with dual screen setup"""
-    # Initialize dual screen manager
-    screen_manager = DualScreenManager("Speed Build - Control", "Speed Build - Timer")
 
-    print("Speed Build - Dual screen setup initialized.")
-    print("Use main screen to select players/difficulty and start game.")
-    print("Timer will display on secondary screen.")
+def _sb_match_scores(st):
+    if not hasattr(st, "players") or not hasattr(st, "target_drawing"):
+        return []
+    td = st.target_drawing
+    return [
+        sum(1 for y in range(6) for x in range(6) if p.board[y][x] == td[y][x])
+        for p in st.players
+    ]
 
-    game = None
-    game_thread = None
-    net = None
 
-    try:
-        running = True
-        while running:
-            # Update screens and handle input
-            running = screen_manager.update(game.settings if game else None)
+def _state_speedbuild(game):
+    if game is None:
+        return {
+            "state": "WAITING",
+            "turn": None,
+            "scores": [],
+            "detail": "Selectează jucători și dificultate, apoi START.",
+            "scores_label": "—",
+        }
+    st = game.engine.state
+    name = type(st).__name__ if st else "UNKNOWN"
+    settings = game.settings
+    detail = [
+        f"Jucători: {settings.player_count}",
+        f"Dificultate: {settings.difficulty}",
+    ]
 
-            # Check if game should start
-            if screen_manager.is_game_started() and game is None:
-                # Get configuration from dual screen
-                config = screen_manager.get_game_config()
+    if hasattr(settings, "status_text") and settings.status_text:
+        detail.append(f"Mod: {settings.status_text}")
+    if hasattr(settings, "time_left") and not getattr(settings, "hide_timer", True):
+        detail.append(f"Timp rămas: {settings.time_left:.1f}s")
 
-                # Create game settings
-                settings = SpeedBuildSettings(config['players'], config['difficulty'])
-                settings.hide_timer = True
-                settings.hide_status = True
-                spawn_rules = DummySpawnRules()
+    scores = []
+    winner_text = ""
+    show_winner = False
 
-                def make_start(): return SBInitState(settings, spawn_rules)
-                game = GameMaster(make_start, settings, spawn_rules, transitions)
+    if name == "SBPlayState":
+        scores = _sb_match_scores(st)
+    elif name == "SBReviewState":
+        scores = [p.score for p in st.players]
+        show_winner = True
+        if st.is_tie:
+            winner_text = "Egalitate!"
+        elif st.winner is not None:
+            winner_text = f"Câștigător: jucător {st.winner.id}"
+        else:
+            winner_text = "Rezultate"
 
-                config_data = load_config(_CFG_FILE)
-                net = NetworkManager(game, config=config_data)
-                net.start_bg()
+    return {
+        "state": name,
+        "turn": None,
+        "scores": scores,
+        "winner": st.winner.id if name == "SBReviewState" and st.winner is not None and not st.is_tie else None,
+        "winner_text": winner_text,
+        "show_winner": show_winner,
+        "detail": "\n".join(detail),
+        "scores_label": "Celule corecte (max 36) per jucător" if scores else "—",
+    }
 
-                # Start game thread
-                game_thread = threading.Thread(target=game_thread_func, args=(game,), daemon=True)
-                game_thread.start()
 
-                print(f"Speed Build started! Players: {config['players']}, Difficulty: {config['difficulty']}")
+def _start_speedbuild(ctx: DualRuntimeCtx, players: int, difficulty: int) -> None:
+    if ctx.game is not None and ctx.game.running:
+        return
+    if ctx.game is not None and not ctx.game.running:
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
 
-            # Handle game stop/cleanup
-            if not screen_manager.is_game_started() and game is not None:
-                # User pressed stop button or game ended
-                game.running = False  # Signal game to stop
-                if net:
-                    # Clear the LED matrix
-                    black_frame = b'\x00' * FRAME_DATA_LENGTH
-                    net.send_packet(black_frame)
-                    # Stop network loops
-                    net.running = False
-                game = None
-                print("Game stopped. Select new settings to play again.")
+    pl = min(6, max(1, int(players)))
+    diff = min(3, max(1, int(difficulty)))
+    settings = SpeedBuildSettings(pl, diff)
+    settings.hide_timer = True
+    settings.hide_status = True
+    spawn_rules = DummySpawnRules()
 
-            # If game exists, handle natural game completion
-            if game and not game.running:
-                # Game ended naturally
-                if net:
-                    # Clear the LED matrix
-                    black_frame = b'\x00' * FRAME_DATA_LENGTH
-                    net.send_packet(black_frame)
-                    # Stop network loops
-                    net.running = False
-                screen_manager.game_started = False
-                game = None
-                print("Game ended. Select new settings to play again.")
+    def make_start():
+        return SBInitState(settings, spawn_rules)
 
-            # Small delay to prevent excessive CPU usage
-            time.sleep(0.05)
+    ctx.game = GameMaster(make_start, settings, spawn_rules, transitions)
+    cfg = load_config(_CFG_FILE)
+    ctx.net = NetworkManager(ctx.game, config=cfg)
+    ctx.net.start_bg()
+    threading.Thread(target=game_thread_func, args=(ctx.game,), daemon=True).start()
 
-    except KeyboardInterrupt:
-        print("Interrupted by user")
 
-    finally:
-        if game:
-            game.running = False
-        if net:
-            net.running = False
-        screen_manager.quit()
-        print("Exiting...")
+def _on_command(ctx: DualRuntimeCtx, cmd: str, data: dict) -> None:
+    if cmd == "start":
+        _start_speedbuild(ctx, int(data.get("players", 2)), int(data.get("difficulty", 2)))
+    elif cmd == "restart":
+        if ctx.game is not None:
+            ctx.game.restart()
+    elif cmd == "quit":
+        ctx.running = False
+        if ctx.game is not None:
+            ctx.game.running = False
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+        ctx.quit_from_remote.set()
+
+
+def _post_tick(ctx: DualRuntimeCtx) -> None:
+    if ctx.game is not None and not ctx.game.running:
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+
+
+def main():
+    ctx = DualRuntimeCtx()
+    root = tk.Tk()
+    app = MatrixGameDisplays(
+        root,
+        ctx,
+        gui_bind_port=MATRIX_UDP_GUI_BIND,
+        game_bind_port=MATRIX_UDP_GAME_BIND,
+        control_title="Speed Build — panou control",
+        scoreboard_title="Speed Build — scoreboard",
+        min_players=1,
+        max_players=6,
+    )
+    threading.Thread(
+        target=run_gui_udp_loop,
+        args=(ctx, MATRIX_UDP_GAME_BIND, MATRIX_UDP_GUI_BIND, _state_speedbuild, _on_command),
+        kwargs={"post_tick": _post_tick},
+        daemon=True,
+    ).start()
+
+    def on_closing():
+        ctx.running = False
+        if ctx.game is not None:
+            ctx.game.running = False
+        cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+        app.gui_running = False
+        try:
+            app.score_window.destroy()
+        except Exception:
+            pass
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    root.mainloop()
+    ctx.running = False
+    cleanup_matrix_game(ctx, FRAME_DATA_LENGTH)
+
 
 if __name__ == "__main__":
-    run_speedbuild_with_dual_screen()
+    main()
