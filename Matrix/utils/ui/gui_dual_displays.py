@@ -171,6 +171,16 @@ def _pick_primary_secondary(
     return primary_rect, (sx, sy, sw, sh)
 
 
+def _win32_outer_hwnd(widget: tk.Misc) -> int:
+    """Tk may return a child HWND; Win32 needs the decorated top-level for SetWindowPos."""
+    import ctypes
+
+    hid = int(widget.winfo_id())
+    GA_ROOT = 2
+    root_hwnd = ctypes.windll.user32.GetAncestor(hid, GA_ROOT)
+    return int(root_hwnd) if root_hwnd else hid
+
+
 def _win32_set_window_rect(widget: tk.Misc, x: int, y: int, w: int, h: int) -> None:
     """Force outer window position/size on Windows (helps move Toplevel to 2nd monitor)."""
     if sys.platform != "win32":
@@ -178,7 +188,7 @@ def _win32_set_window_rect(widget: tk.Misc, x: int, y: int, w: int, h: int) -> N
     try:
         import ctypes
 
-        hwnd = int(widget.winfo_id())
+        hwnd = _win32_outer_hwnd(widget)
         SWP_NOZORDER = 0x0004
         SWP_SHOWWINDOW = 0x0040
         ctypes.windll.user32.SetWindowPos(
@@ -186,6 +196,26 @@ def _win32_set_window_rect(widget: tk.Misc, x: int, y: int, w: int, h: int) -> N
         )
     except Exception:
         pass
+
+
+def _fill_monitor_borderless(widget: tk.Misc, x: int, y: int, w: int, h: int) -> None:
+    """
+    Fill a monitor rectangle without using -fullscreen (which often forces both Tk windows
+    onto the same monitor on Windows). Borderless + explicit geometry + SetWindowPos.
+    """
+    widget.attributes("-fullscreen", False)
+    try:
+        widget.state("normal")
+    except tk.TclError:
+        pass
+    try:
+        widget.attributes("-zoomed", False)
+    except tk.TclError:
+        pass
+    widget.overrideredirect(True)
+    widget.geometry(f"{max(1, w)}x{max(1, h)}+{x}+{y}")
+    widget.update_idletasks()
+    _win32_set_window_rect(widget, x, y, w, h)
 
 # Bidirectional UDP (game ↔ Tk): game binds GAME, sends state to GUI; GUI binds GUI, sends cmds to GAME.
 # Pair 4626 / 7800; GUI listen port uses 7800 + 1 (7801) so the base 7800 stays the documented “state” side.
@@ -330,7 +360,7 @@ class MatrixGameDisplays:
         self.root.after(350, self._apply_centered_scaled_layout)
 
     def _apply_fullscreen_layout(self) -> None:
-        """Primary monitor: control fullscreen. Secondary: scoreboard fullscreen (Windows + Linux)."""
+        """Single monitor: fullscreen (or split). Two monitors: borderless geometry per screen (not -fullscreen)."""
         if not self.gui_running:
             return
         try:
@@ -340,24 +370,25 @@ class MatrixGameDisplays:
             if primary and secondary:
                 px, py, pw, ph = primary
                 sx, sy, sw, sh = secondary
-                # Control: move to primary, then fullscreen
-                self.root.attributes("-fullscreen", False)
-                self.root.geometry(f"{pw}x{ph}+{px}+{py}")
-                self.root.update_idletasks()
-                _win32_set_window_rect(self.root, px, py, pw, ph)
                 self.root.deiconify()
-                self.root.lift()
-                self.root.attributes("-fullscreen", True)
-
-                # Scoreboard: must be placed on the secondary rect *before* fullscreen or it stays on primary
-                self.score_window.attributes("-fullscreen", False)
-                self.score_window.withdraw()
-                self.score_window.geometry(f"{sw}x{sh}+{sx}+{sy}")
-                self.score_window.update_idletasks()
-                _win32_set_window_rect(self.score_window, sx, sy, sw, sh)
                 self.score_window.deiconify()
+                # Do not use -fullscreen for two Tk windows on Windows: both often land on one monitor.
+                _fill_monitor_borderless(self.root, px, py, pw, ph)
+                _fill_monitor_borderless(self.score_window, sx, sy, sw, sh)
+                self.root.lift()
                 self.score_window.lift()
-                self.score_window.attributes("-fullscreen", True)
+
+                def _retry_dual() -> None:
+                    if not self.gui_running:
+                        return
+                    try:
+                        _fill_monitor_borderless(self.root, px, py, pw, ph)
+                        _fill_monitor_borderless(self.score_window, sx, sy, sw, sh)
+                        self.score_window.lift()
+                    except tk.TclError:
+                        pass
+
+                self.root.after(450, _retry_dual)
             elif primary:
                 px, py, pw, ph = primary
                 self.root.attributes("-fullscreen", False)
